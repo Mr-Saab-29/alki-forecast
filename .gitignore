@@ -1,0 +1,94 @@
+# ---------------------------
+# OS & Editor Junk
+# ---------------------------
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pdb
+*.so
+*.dll
+*.log
+*.bak
+*.tmp
+*.temp
+
+# ---------------------------
+# Python Environment / Build
+# ---------------------------
+.venv/
+.uv/
+.env
+.env.*
+venv/
+ENV/
+env/
+*.egg-info/
+.eggs/
+dist/
+build/
+pip-wheel-metadata/
+uv.lock  # optional: ignore lock if you want lighter repo
+
+# ---------------------------
+# Jupyter / Notebooks
+# ---------------------------
+.ipynb_checkpoints/
+*.nbconvert.ipynb
+
+# ---------------------------
+# Data & Outputs
+# ---------------------------
+data/raw/*
+data/interim/*
+data/processed/*
+outputs/*
+models/*
+
+# Keep folder structure but ignore contents
+!data/raw/.gitkeep
+!data/interim/.gitkeep
+!data/processed/.gitkeep
+!outputs/.gitkeep
+!models/.gitkeep
+
+
+# ---------------------------
+# Unit Tests / Coverage
+# ---------------------------
+.coverage
+htmlcov/
+.tox/
+.pytest_cache/
+nosetests.xml
+coverage.xml
+
+# ---------------------------
+# Others
+# ---------------------------
+*.sqlite3
+*.db
+*.csv
+*.tsv
+*.xlsx
+*.xls
+*.h5
+*.parquet
+*.zip
+*.tar
+*.gz
+*.pkl
+*.sav
+
+# ---------------------------
+# MacOS metadata
+# ---------------------------
+.AppleDouble
+.Spotlight-V100
+.Trashes
