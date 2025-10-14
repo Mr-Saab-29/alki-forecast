@@ -1,0 +1,39 @@
+[project]
+name = "alki-forecast"
+version = "0.1.0"
+description = "Daily demand forecasting system (P10/P50/P90) for Alki technical test"
+authors = [{ name = "Sabarish Ravichandran" }]
+readme = "README.md"
+requires-python = ">=3.10"
+
+dependencies = [
+  "pandas",
+  "numpy",
+  "matplotlib",
+  "statsmodels",
+  "lightgbm",
+  "scikit-learn",
+  "pyyaml",
+  "ruptures",
+  "seaborn"
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest",
+  "ruff",
+  "ipykernel",
+  "jupytext",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+lint.select = ["E", "F", "I", "UP", "B"]
+format.quote-style = "double"
+
+[tool.pytest.ini_options]
+addopts = "-q"
+
+[tool.jupytext]
+formats = "ipynb,py:percent"

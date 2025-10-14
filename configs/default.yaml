@@ -1,0 +1,59 @@
+# ==============================
+# Alki Forecast Configuration
+# ==============================
+
+paths:
+  raw: data/raw/train.csv
+  outputs_dir: outputs
+  models_dir: models
+  figures_dir: outputs/figures
+  cv_dir: outputs/cv
+
+# ------------------------------
+# Cross-Validation Settings
+# ------------------------------
+cv:
+  n_folds: 4              # number of folds for backtesting
+  min_train_days: 365     # minimum training days before first fold
+  fold_horizon_days: 14   # test horizon per fold (2 weeks)
+
+# ------------------------------
+# Feature Engineering Settings
+# ------------------------------
+features:
+  lags: [1, 2, 7, 14, 28]
+  roll_windows: [3, 7, 14, 28]
+  fourier_periods: [7, 30, 365]
+  use_log1p: true
+
+# ------------------------------
+# Modeling Settings
+# ------------------------------
+modeling:
+  families:
+    continuous: gbm_quantile      # for stable clients
+    intermittent: croston         # for lumpy clients
+  quantiles: [0.1, 0.5, 0.9]
+
+# ------------------------------
+# Forecast Window (Final Output)
+# ------------------------------
+forecast_window:
+  start: "2023-06-05"
+  end: "2023-06-25"
+
+# ------------------------------
+# Evaluation Metrics
+# ------------------------------
+metrics:
+  - rmse
+  - smape
+  - mase
+  - pinball
+  - coverage
+
+# ------------------------------
+# Miscellaneous
+# ------------------------------
+logging:
+  level: INFO
