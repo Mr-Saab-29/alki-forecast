@@ -48,3 +48,22 @@ def load_raw(path: str) -> pd.DataFrame:
     # Sort & return
     df = df.sort_values(["CUSTOMER", "DATE"]).reset_index(drop=True)
     return df
+
+def reindex_daily(df: pd.DataFrame) -> pd.DataFrame:
+    """ Reindex the DataFrame to ensure a continuous daily date range
+    for each customer. Missing dates will have NaN quantities.
+    
+    Args:
+        df (pd.DataFrame): Input DataFrame with 'DATE', 'CUSTOMER', and 'QUANTITY' columns.
+    
+    Returns:
+        pd.DataFrame: Reindexed DataFrame with continuous daily dates.
+    """
+    out = []
+    for cust, g in df.groupby("CUSTOMER", sort=False):
+        full_idx = pd.date_range(g["DATE"].min(), g["DATE"].max(), freq="D")
+        g = g.set_index("DATE").reindex(full_idx)
+        g["CUSTOMER"] = cust
+        g.index.name = "DATE"
+        out.append(g.reset_index())
+    return pd.concat(out, ignore_index=True)[["DATE", "CUSTOMER", "QUANTITY"]]
