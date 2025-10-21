@@ -15,7 +15,8 @@ dependencies = [
   "scikit-learn",
   "pyyaml",
   "ruptures",
-  "seaborn"
+  "seaborn",
+  "holidays>=0.82",
 ]
 
 [project.optional-dependencies]

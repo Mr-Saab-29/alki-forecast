@@ -173,8 +173,8 @@ def clean_and_truncate_series(
 
     # Trim long inactive head/tail
     s_trim = s_raw
-    if inactive_lead_days > long_gap_days or inactive_tail_days > long_gap_days:
-        s_trim = s_raw.loc[first_sustained:last_sustained]
+    if inactive_lead_days > long_gap_days:
+        s_trim = s_raw.loc[first_sustained:]
 
     # Hybrid fill (causal-safe if causal=True)
     s_clean = _hybrid_fill(s_trim, gap_limit=gap_limit, causal=causal)
