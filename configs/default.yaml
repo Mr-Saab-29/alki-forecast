@@ -1,50 +1,88 @@
-# ==============================
+# ============================================================
 # Alki Forecast Configuration
-# ==============================
+# ============================================================
 
 paths:
   raw: data/raw/train.csv
+  processed: data/processed/df_clean.parquet
+  metadata: data/processed/clean_meta.parquet
+  features_train: data/processed/features_train.parquet
+  features_future: data/processed/features_future.parquet
   outputs_dir: outputs
   models_dir: models
   figures_dir: outputs/figures
   cv_dir: outputs/cv
 
-# ------------------------------
-# Cross-Validation Settings
-# ------------------------------
-cv:
-  n_folds: 4              # number of folds for backtesting
-  min_train_days: 365     # minimum training days before first fold
-  fold_horizon_days: 14   # test horizon per fold (2 weeks)
+# ------------------------------------------------------------
+# Preprocessing
+# ------------------------------------------------------------
+preprocess:
+  freq: "D"
+  gap_limit: 7
+  long_gap_days: 60            # trims only leading inactivity
+  min_active_days: 30
+  causal: true
+  min_nonzero_run: 7
+  min_nonzero_value: 1.0
+  verbose: false
 
-# ------------------------------
-# Feature Engineering Settings
-# ------------------------------
+# ------------------------------------------------------------
+# Cross-Validation
+# ------------------------------------------------------------
+cv:
+  window_type: "expanding"     # or "sliding"
+  n_folds: 5
+  step_days: 7
+  horizon_days: 25
+  gap_days: 0
+  train_window_days: 365
+  by_customer: true
+  min_hist: null               # computed via compute_min_hist()
+
+# legacy keys (safe for backward compatibility)
+  min_train_days: 365
+  fold_horizon_days: 14
+
+# ------------------------------------------------------------
+# Feature Engineering
+# ------------------------------------------------------------
 features:
-  lags: [1, 2, 7, 14, 28]
-  roll_windows: [3, 7, 14, 28]
+  max_lag: 30
+  roll_windows: [7, 14, 30]
   fourier_periods: [7, 30, 365]
+  trim_by_history: true
+  dropna_mode: "none"
   use_log1p: true
 
-# ------------------------------
-# Modeling Settings
-# ------------------------------
+  holiday_country: "FR"
+  holiday_subdiv_map: null
+  holiday_window: 3
+
+# ------------------------------------------------------------
+# Modeling (Phase 3+ placeholder)
+# ------------------------------------------------------------
 modeling:
   families:
-    continuous: gbm_quantile      # for stable clients
-    intermittent: croston         # for lumpy clients
+    continuous: gbm_quantile
+    intermittent: croston
   quantiles: [0.1, 0.5, 0.9]
 
-# ------------------------------
-# Forecast Window (Final Output)
-# ------------------------------
+# ------------------------------------------------------------
+# Inference / Forecast Window
+# ------------------------------------------------------------
+inference:
+  forecast_start: "2023-06-03"   # unified forecast start
+  horizon_days: 21               # forecast 3 weeks ahead
+  extend_missing_days: true
+
+# legacy section retained for compatibility
 forecast_window:
   start: "2023-06-05"
   end: "2023-06-25"
 
-# ------------------------------
+# ------------------------------------------------------------
 # Evaluation Metrics
-# ------------------------------
+# ------------------------------------------------------------
 metrics:
   - rmse
   - smape
@@ -52,8 +90,15 @@ metrics:
   - pinball
   - coverage
 
-# ------------------------------
-# Miscellaneous
-# ------------------------------
+# ------------------------------------------------------------
+# Logging & Reproducibility
+# ------------------------------------------------------------
 logging:
   level: INFO
+  path: logs/alki_forecast.log
+  save_to_file: true
+
+reproducibility:
+  seed: 42
+  numpy_seed: 42
+  pythonhashseed: 0

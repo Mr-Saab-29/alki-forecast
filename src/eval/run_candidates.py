@@ -1,0 +1,322 @@
+# src/eval/run_candidates.py
+from __future__ import annotations
+import numpy as np, pandas as pd, yaml
+from pathlib import Path
+from typing import Dict, Tuple, Optional, List
+
+from src.utils.timeseries_split import compute_min_hist, rolling_time_series_cv, select_by_index
+from src.features.build_features import build_features
+from src.features.future_features import build_future_features
+
+from src.models import arima_like as arima
+from src.models.prophet_model import fit_forecast_prophet
+from src.models.gbm import fit_predict_gbm_recursive
+from src.eval.run_baselines import mae, rmse, smape
+
+def _build_features(df_slice, *, max_lag, roll_windows, holiday_country, holiday_subdiv_map, holiday_window, trim_by_history, dropna_mode):
+    """
+    Wrapper to build features with specified parameters.
+    
+    Args:
+        df_slice (pd.DataFrame): DataFrame slice for a specific customer.
+        max_lag (int): Maximum lag to create.
+        roll_windows (list[int]): List of window sizes for rolling means.
+        holiday_country (str): Country code for holiday features.
+        holiday_subdiv_map (Optional[Dict[str, str]]): Mapping of CUSTOMER to holiday
+        holiday_window (int): Window size for holiday effect smoothing.
+        trim_by_history (bool): Whether to trim by history.
+        dropna_mode (str): Mode for dropping NA values.
+    
+    Returns:
+        pd.DataFrame: DataFrame with built features.
+    """
+    return build_features(
+        df_slice,
+        max_lag=max_lag,
+        roll_windows=roll_windows,
+        holiday_country=holiday_country,
+        holiday_subdiv_map=holiday_subdiv_map,
+        holiday_window=holiday_window,
+        trim_by_history=trim_by_history,
+        dropna_mode=dropna_mode,
+    )
+
+def _to_series(df: pd.DataFrame) -> pd.Series:
+    s = df[["DATE","QUANTITY"]].set_index("DATE").sort_index()["QUANTITY"].asfreq("D")
+    return s.fillna(0.0)
+
+def _apply_transform(y: np.ndarray, transform: str, inverse: bool=False) -> np.ndarray:
+    if transform == "log1p":
+        return (np.expm1(y) if inverse else np.log1p(y))
+    return y
+
+def run_candidates_per_customer(
+    df_clean: pd.DataFrame,
+    model_matrix_path: str | Path,
+    *,
+    # CV
+    n_folds: int = 5, window_type: str = "expanding", step_days: int = 7, horizon_days: int = 25, gap_days: int = 0, train_window_days: int = 365,
+    # features
+    max_lag: int = 30, roll_windows: List[int] = [7,14,30], holiday_country: str = "FR", holiday_subdiv_map: Optional[Dict[str,str]] = None, holiday_window: int = 3,
+    trim_by_history: bool = True, dropna_mode: str = "none",
+    # output
+    out_dir: str | Path = "outputs/cv/candidates", save_csv: bool = True,
+) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    """
+    Run candidate models per customer over rolling CV folds as specified in model_matrix_path.
+    Returns (per_fold_df, summary_df). Optionally writes CSVs to out_dir.
+    """
+    def _log_error(cust, fold, model, err, rows, horizon, anchor=None):
+        msg = f"[ERROR] {cust} | Fold {fold} | Model: {model} → {type(err).__name__}: {err}"
+        print(msg)
+        rows.append({
+            "CUSTOMER": cust, "fold": fold, "anchor": anchor, "model": model + "_ERROR",
+            "MAE": np.nan, "RMSE": np.nan, "sMAPE": np.nan, "n": horizon, "error": str(err)
+        })
+
+        # -----------------------------
+    # Hardened param sanitizers
+    # -----------------------------
+
+    def _norm_key(k: str) -> str:
+        """Normalize YAML keys like 'p:1' or ' P ' to canonical form."""
+        if not isinstance(k, str):
+            return k
+        k = k.strip()
+        if ":" in k:
+            k = k.split(":", 1)[0].strip()
+        return k
+
+    def _coerce_int(x, default: int) -> int:
+        """Coerce various YAML values (None, '', '1', '1.0', 1.0) to int safely."""
+        try:
+            if x is None:
+                return default
+            if isinstance(x, str):
+                s = x.strip()
+                if s == "":
+                    return default
+                if ":" in s:               # e.g., "p:1"
+                    s = s.split(":", 1)[-1].strip()
+                # try as int, then float→int
+                return int(float(s))
+            if isinstance(x, (int, np.integer)):
+                return int(x)
+            if isinstance(x, (float, np.floating)):
+                return int(round(float(x)))
+            return default
+        except Exception:
+            return default
+
+    def _coerce_float(x, default: float) -> float:
+        """Coerce various YAML values to float safely."""
+        try:
+            if x is None:
+                return default
+            if isinstance(x, str):
+                s = x.strip()
+                if s == "":
+                    return default
+                if ":" in s:
+                    s = s.split(":", 1)[-1].strip()
+                return float(s)
+            if isinstance(x, (int, np.integer, float, np.floating)):
+                return float(x)
+            return default
+        except Exception:
+            return default
+
+    def _sanitize_params(d: dict) -> dict:
+        """Normalize keys (strip, split ':'), keep raw values (coercion later)."""
+        out = {}
+        for k, v in (d or {}).items():
+            out[_norm_key(k)] = v
+        return out
+
+    def _first_from_grid(grid: dict) -> dict:
+        """Choose the first candidate for each grid key; normalize keys."""
+        if not isinstance(grid, dict):
+            return {}
+        out = {}
+        for k, v in grid.items():
+            key = _norm_key(k)
+            if isinstance(v, (list, tuple)) and len(v):
+                out[key] = v[0]
+            else:
+                out[key] = v
+        return out
+
+    def _sanitize_arima_params(raw: dict) -> dict:
+        """Return complete ARIMA params with safe defaults (no None)."""
+        d = _sanitize_params(raw)
+        return {
+            "p": _coerce_int(d.get("p"), 1),
+            "d": _coerce_int(d.get("d"), 1),
+            "q": _coerce_int(d.get("q"), 1),
+        }
+
+    def _sanitize_sarima_params(raw: dict) -> dict:
+        """Return complete SARIMA params with safe defaults (no None)."""
+        d = _sanitize_params(raw)
+        return {
+            "p":  _coerce_int(d.get("p"), 1),
+            "d":  _coerce_int(d.get("d"), 1),
+            "q":  _coerce_int(d.get("q"), 1),
+            "P":  _coerce_int(d.get("P"), 0),
+            "D":  _coerce_int(d.get("D"), 1),
+            "Q":  _coerce_int(d.get("Q"), 1),
+            "sp": _coerce_int(d.get("sp"), 7),
+        }
+
+    def _pick_sanitized(order_type: str, grid: Optional[dict], params: dict) -> dict:
+        """
+        If a grid is present, pick first values then sanitize; else sanitize params.
+        order_type ∈ {'arima','sarima'}.
+        """
+        raw = _first_from_grid(grid) if isinstance(grid, dict) else params
+        if order_type == "arima":
+            return _sanitize_arima_params(raw or {})
+        else:
+            return _sanitize_sarima_params(raw or {})
+
+    cfg = yaml.safe_load(Path(model_matrix_path).read_text())
+    df = df_clean.copy()
+    if not np.issubdtype(df["DATE"].dtype, np.datetime64):
+        df["DATE"] = pd.to_datetime(df["DATE"])
+    df = df.sort_values(["CUSTOMER","DATE"]).reset_index(drop=True)
+
+    out_path = Path(out_dir)
+    out_path.mkdir(parents=True, exist_ok=True)
+    min_hist = compute_min_hist(max_lag, roll_windows)
+
+    rows = []
+
+    for cust, spec in cfg["customers"].items():
+        df_c = df[df["CUSTOMER"] == cust].reset_index(drop=True)
+        if df_c.empty:
+            continue
+
+        transform = spec.get("transform", "raw")
+        models = spec.get("models", [])
+        folds = rolling_time_series_cv(
+            df_c, n_folds=n_folds, window_type=window_type, train_window_days=train_window_days,
+            step_days=step_days, horizon_days=horizon_days, gap_days=gap_days, by_customer=True, min_hist=min_hist
+        )
+
+        if not folds:
+            _log_error(cust, None, "NO_FOLDS", Exception("No valid folds"), rows, 0)
+            continue
+
+        for f in folds:
+            train_df = select_by_index(df_c, f.train_idx)
+            val_df   = select_by_index(df_c, f.val_idx)
+
+            s_train = _to_series(train_df)
+            horizon = val_df["DATE"].nunique()
+
+            for m in models:
+                name   = m["name"]
+                family = m["family"]
+                params = m.get("params", {})
+
+                try:
+                    if family == "arima":
+                        grid = m.get("grid")
+                        params = _pick_sanitized("arima", grid, params)
+
+                        y_tr = _apply_transform(s_train.values, transform, inverse=False)
+                        s_tr = pd.Series(y_tr, index=s_train.index)
+                        yhat = arima.fit_forecast_arima(s_tr, horizon=horizon, **params)
+                        yhat = _apply_transform(yhat, transform, inverse=True)
+
+                    elif family == "sarima":
+                        params = _pick_sanitized("sarima", None, params)
+
+                        y_tr = _apply_transform(s_train.values, transform, inverse=False)
+                        s_tr = pd.Series(y_tr, index=s_train.index)
+                        try:
+                            yhat = arima.fit_forecast_sarima(s_tr, horizon=horizon, **params)
+                        except Exception:
+                            # robust weekly fallback if configured spec fails at runtime
+                            yhat = arima.fit_forecast_sarima(
+                                s_tr, horizon=horizon, p=0, d=1, q=1, P=0, D=1, Q=1, sp=7
+                            )
+                        yhat = _apply_transform(yhat, transform, inverse=True)
+
+                    elif family == "ets":
+                        y_tr = _apply_transform(s_train.values, transform, inverse=False)
+                        s_tr = pd.Series(y_tr, index=s_train.index)
+                        yhat = arima.fit_forecast_ets(s_tr, horizon=horizon, **params)
+                        yhat = _apply_transform(yhat, transform, inverse=True)
+
+                    elif family == "prophet":
+                        # Prophet fallback if CmdStan or backend issue
+                        try:
+                            yhat = fit_forecast_prophet(s_train, horizon=horizon, **params)
+                        except AttributeError as e:
+                            if "stan_backend" in str(e):
+                                print(f"[WARN] Prophet backend error for {cust}. Skipping Prophet.")
+                                from src.models.arima_like import fit_forecast_ets
+                                yhat = arima.fit_forecast_ets(s_train, horizon=horizon, trend="add", seasonal="add", sp=7)
+                            else:
+                                raise
+
+                    elif family == "gbm":
+                        use_lgb = bool(m.get("use_lightgbm", False))
+                        yhat = fit_predict_gbm_recursive(
+                            train_df,
+                            build_features_fn=lambda d: _build_features(
+                                d, max_lag=max_lag, roll_windows=roll_windows,
+                                holiday_country=holiday_country, holiday_subdiv_map=holiday_subdiv_map,
+                                holiday_window=holiday_window, trim_by_history=trim_by_history,
+                                dropna_mode=dropna_mode,
+                            ),
+                            build_future_features_fn=lambda d, horizon: build_future_features(d, horizon=horizon),
+                            horizon=horizon,
+                            params=params,
+                            transform=transform,
+                            use_lightgbm=use_lgb,
+                            max_lag=max_lag,
+                            roll_windows=roll_windows,
+                        )
+
+                    else:
+                        raise ValueError(f"Unknown model family: {family}")
+
+                    y_true = val_df.sort_values("DATE")["QUANTITY"].to_numpy()
+                    rows.append({
+                        "CUSTOMER": cust,
+                        "fold": f.fold,
+                        "anchor": f.meta["anchor"].date(),
+                        "model": name,
+                        "MAE": mae(y_true, yhat),
+                        "RMSE": rmse(y_true, yhat),
+                        "sMAPE": smape(y_true, yhat),
+                        "n": horizon,
+                    })
+
+                except Exception as e:
+                    _log_error(cust, f.fold, name, e, rows, horizon, anchor=f.meta["anchor"].date())
+
+    # Convert to DataFrame
+    per_fold = pd.DataFrame(rows).sort_values(["CUSTOMER","model","fold"]).reset_index(drop=True)
+
+    # Save separate error log
+    err_df = per_fold[per_fold["model"].str.contains("_ERROR", na=False)]
+    if not err_df.empty:
+        err_df.to_csv(out_path / "candidates_errors.csv", index=False)
+
+    # Summary (ignore error rows)
+    summary = (
+        per_fold[~per_fold["model"].str.contains("_ERROR", na=False)]
+        .groupby(["CUSTOMER","model"], as_index=False)[["MAE","RMSE","sMAPE"]]
+        .mean()
+        .sort_values(["CUSTOMER","sMAPE"])
+        .reset_index(drop=True)
+    )
+
+    if save_csv:
+        per_fold.to_csv(out_path / "candidates_per_fold.csv", index=False)
+        summary.to_csv(out_path / "candidates_summary.csv", index=False)
+
+    return per_fold, summary
