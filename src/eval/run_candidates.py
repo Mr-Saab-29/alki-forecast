@@ -13,7 +13,18 @@ from src.models.prophet_model import fit_forecast_prophet
 from src.models.gbm import fit_predict_gbm_recursive
 from src.eval.run_baselines import mae, rmse, smape
 
-def _build_features(df_slice, *, max_lag, roll_windows, holiday_country, holiday_subdiv_map, holiday_window, trim_by_history, dropna_mode):
+def _build_features(
+    df_slice,
+    *,
+    max_lag,
+    roll_windows,
+    holiday_country,
+    holiday_subdiv_map,
+    holiday_window,
+    trim_by_history,
+    dropna_mode,
+    feature_set: str = "full",
+):
     """
     Wrapper to build features with specified parameters.
     
@@ -39,6 +50,7 @@ def _build_features(df_slice, *, max_lag, roll_windows, holiday_country, holiday
         holiday_window=holiday_window,
         trim_by_history=trim_by_history,
         dropna_mode=dropna_mode,
+        feature_set=feature_set,
     )
 
 def _to_series(df: pd.DataFrame) -> pd.Series:
@@ -74,7 +86,7 @@ def run_candidates_per_customer(
             "MAE": np.nan, "RMSE": np.nan, "sMAPE": np.nan, "n": horizon, "error": str(err)
         })
 
-        # -----------------------------
+    # -----------------------------
     # Hardened param sanitizers
     # -----------------------------
 
@@ -214,6 +226,47 @@ def run_candidates_per_customer(
             s_train = _to_series(train_df)
             horizon = val_df["DATE"].nunique()
 
+            exog_cache: Optional[Tuple[pd.DataFrame, pd.DataFrame]] = None
+
+            def _get_exog_frames() -> Tuple[pd.DataFrame, pd.DataFrame]:
+                nonlocal exog_cache
+                if exog_cache is None:
+                    feats_tr = _build_features(
+                        train_df,
+                        max_lag=max_lag,
+                        roll_windows=roll_windows,
+                        holiday_country=holiday_country,
+                        holiday_subdiv_map=holiday_subdiv_map,
+                        holiday_window=holiday_window,
+                        trim_by_history=False,
+                        dropna_mode="none",
+                        feature_set="deterministic",
+                    )
+                    exog_cols = [c for c in feats_tr.columns if c not in {"DATE", "CUSTOMER", "QUANTITY"}]
+                    feats_tr = (
+                        feats_tr.set_index("DATE")
+                        .sort_index()
+                        .reindex(s_train.index)
+                    )
+                    exog_tr = feats_tr[exog_cols].fillna(0.0)
+                    exog_tr = exog_tr.replace([np.inf, -np.inf], 0.0)
+
+                    fut_feats = build_future_features(
+                        train_df,
+                        horizon=horizon,
+                        max_lag=max_lag,
+                        roll_windows=roll_windows,
+                        holiday_country=holiday_country,
+                        holiday_subdiv_map=holiday_subdiv_map,
+                        holiday_window=holiday_window,
+                        feature_set="deterministic",
+                    )
+                    fut_feats = fut_feats.set_index("DATE").sort_index()
+                    exog_fut = fut_feats.reindex(columns=exog_cols).fillna(0.0)
+                    exog_fut = exog_fut.replace([np.inf, -np.inf], 0.0)
+                    exog_cache = (exog_tr, exog_fut)
+                return exog_cache
+
             for m in models:
                 name   = m["name"]
                 family = m["family"]
@@ -226,7 +279,16 @@ def run_candidates_per_customer(
 
                         y_tr = _apply_transform(s_train.values, transform, inverse=False)
                         s_tr = pd.Series(y_tr, index=s_train.index)
-                        yhat = arima.fit_forecast_arima(s_tr, horizon=horizon, **params)
+                        exog_tr, exog_fut = _get_exog_frames()
+                        exog_tr_arr = None if exog_tr.empty or exog_tr.shape[1] == 0 else exog_tr.to_numpy()
+                        exog_fut_arr = None if exog_fut.empty or exog_fut.shape[1] == 0 else exog_fut.to_numpy()
+                        yhat = arima.fit_forecast_arima(
+                            s_tr,
+                            horizon=horizon,
+                            exog_train=exog_tr_arr,
+                            exog_future=exog_fut_arr,
+                            **params,
+                        )
                         yhat = _apply_transform(yhat, transform, inverse=True)
 
                     elif family == "sarima":
@@ -235,11 +297,30 @@ def run_candidates_per_customer(
                         y_tr = _apply_transform(s_train.values, transform, inverse=False)
                         s_tr = pd.Series(y_tr, index=s_train.index)
                         try:
-                            yhat = arima.fit_forecast_sarima(s_tr, horizon=horizon, **params)
+                            exog_tr, exog_fut = _get_exog_frames()
+                            exog_tr_arr = None if exog_tr.empty or exog_tr.shape[1] == 0 else exog_tr.to_numpy()
+                            exog_fut_arr = None if exog_fut.empty or exog_fut.shape[1] == 0 else exog_fut.to_numpy()
+                            yhat = arima.fit_forecast_sarima(
+                                s_tr,
+                                horizon=horizon,
+                                exog_train=exog_tr_arr,
+                                exog_future=exog_fut_arr,
+                                **params,
+                            )
                         except Exception:
                             # robust weekly fallback if configured spec fails at runtime
                             yhat = arima.fit_forecast_sarima(
-                                s_tr, horizon=horizon, p=0, d=1, q=1, P=0, D=1, Q=1, sp=7
+                                s_tr,
+                                horizon=horizon,
+                                p=0,
+                                d=1,
+                                q=1,
+                                P=0,
+                                D=1,
+                                Q=1,
+                                sp=7,
+                                exog_train=exog_tr_arr,
+                                exog_future=exog_fut_arr,
                             )
                         yhat = _apply_transform(yhat, transform, inverse=True)
 
@@ -252,7 +333,16 @@ def run_candidates_per_customer(
                     elif family == "prophet":
                         # Prophet fallback if CmdStan or backend issue
                         try:
-                            yhat = fit_forecast_prophet(s_train, horizon=horizon, **params)
+                            exog_tr, exog_fut = _get_exog_frames()
+                            exog_tr_df = None if exog_tr.empty or exog_tr.shape[1] == 0 else exog_tr
+                            exog_fut_df = None if exog_fut.empty or exog_fut.shape[1] == 0 else exog_fut
+                            yhat = fit_forecast_prophet(
+                                s_train,
+                                horizon=horizon,
+                                exog_train=exog_tr_df,
+                                exog_future=exog_fut_df,
+                                **params,
+                            )
                         except AttributeError as e:
                             if "stan_backend" in str(e):
                                 print(f"[WARN] Prophet backend error for {cust}. Skipping Prophet.")

@@ -43,9 +43,9 @@ customers:
   MINCI DELICE:
     transform: log1p
     models:
-      - name: HW-Mul
+      - name: ETS-Mul
         family: ets
-        params: {trend: "add", seasonal: "mul", sp: 7}
+        params: {trend: "mul", seasonal: "mul", sp: 7}
       - name: SARIMA_weekly
         family: sarima
         params: {p:1,d:0,q:1,P:1,D:1,Q:1,sp:7}
@@ -54,11 +54,11 @@ customers:
         params: {seasonality_mode: "multiplicative", changepoint_prior_scale: 0.1}
 
   NUTRAVANCE:
-    transform: raw
+    transform: log1p
     models:
-      - name: ETS-Mul
+      - name: ETS-Add
         family: ets
-        params: {trend: "add", seasonal: "mul", sp: 7}
+        params: {trend: "add", seasonal: "add", sp: 7}
       - name: SARIMA_101_111_7
         family: sarima
         params: {p:1,d:0,q:1,P:1,D:1,Q:1,sp:7}

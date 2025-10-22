@@ -212,7 +212,7 @@ def rolling_time_series_cv(
 
     # anchors move from (global_start + something) to (global_end - horizon)
     # start anchors late enough to allow at least one fold
-    anchor = global_start + pd.Timedelta(days=90)  # heuristic; can be parameterized
+    anchor = global_start + pd.Timedelta(days=950)  # heuristic; can be parameterized
     k = 1
     while anchor + pd.Timedelta(days=gap_days + horizon_days) <= global_end and k <= n_folds:
         tr_idx, va_idx = _per_customer_indices(anchor)

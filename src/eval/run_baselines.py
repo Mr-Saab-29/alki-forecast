@@ -24,16 +24,28 @@ def rmse(y_true, y_pred) -> float:
     return float(np.sqrt(np.mean(e**2)))
 
 # Baseline Models
-def _naive_last_value(X_val: pd.DataFrame) -> np.ndarray:
-    if "lag_1" not in X_val.columns:
-        # very early rows – be safe
-        return np.zeros(len(X_val), dtype=float)
-    return X_val["lag_1"].fillna(0).to_numpy()
+def _naive_last_value(train_series: pd.Series, horizon: int) -> np.ndarray:
+    """Forecast horizon steps using the last observed level from the training series."""
+    if train_series.empty:
+        return np.zeros(horizon, dtype=float)
+    last = float(train_series.dropna().iloc[-1]) if not train_series.dropna().empty else 0.0
+    return np.full(horizon, last, dtype=float)
 
-def _seasonal_weekly(X_val: pd.DataFrame) -> np.ndarray:
-    if "lag_7" not in X_val.columns:
-        return _naive_last_value(X_val)
-    return X_val["lag_7"].fillna(0).to_numpy()
+def _seasonal_weekly(train_series: pd.Series, horizon: int) -> np.ndarray:
+    """
+    Weekly seasonal naïve: repeat the most recent 7-day pattern from the training series.
+    Falls back to last-value if fewer than 7 non-NaN observations exist.
+    """
+    values = train_series.dropna().to_numpy(dtype=float)
+    if values.size == 0:
+        return np.zeros(horizon, dtype=float)
+    if values.size >= 7:
+        pattern = values[-7:]
+    else:
+        last = values[-1]
+        pattern = np.full(7, last, dtype=float)
+    preds = np.array([pattern[i % len(pattern)] for i in range(horizon)], dtype=float)
+    return preds
 
 def _ets_forecast(
     train_series: pd.Series,
@@ -175,28 +187,7 @@ def run_baselines_per_customer(
             if Xy_va.empty:
                 continue
 
-            drop_cols = ["DATE","CUSTOMER","QUANTITY"]
-            X_val = Xy_va.drop(columns=drop_cols)
-            y_val = Xy_va["QUANTITY"].to_numpy()
-            horizon = len(y_val)
-
-            # Baseline 1: Naive-1
-            yhat_naive = _naive_last_value(X_val)
-            rows.append({
-                "CUSTOMER": cust, "fold": f.fold, "anchor": f.meta["anchor"].date(), "model": "Naive-1",
-                "MAE": mae(y_val, yhat_naive), "RMSE": rmse(y_val, yhat_naive), "sMAPE": smape(y_val, yhat_naive),
-                "n": horizon
-            })
-
-            # Baseline 2: Seasonal-7
-            yhat_s7 = _seasonal_weekly(X_val)
-            rows.append({
-                "CUSTOMER": cust, "fold": f.fold, "anchor": f.meta["anchor"].date(), "model": "Seasonal-7",
-                "MAE": mae(y_val, yhat_s7), "RMSE": rmse(y_val, yhat_s7), "sMAPE": smape(y_val, yhat_s7),
-                "n": horizon
-            })
-
-            # Baseline 3: ETS (classical, no feature matrix)
+            # Build chronologically aligned series for forecasting and evaluation
             train_series = (
                 Xy_tr[["DATE","QUANTITY"]]
                 .set_index("DATE")
@@ -204,6 +195,33 @@ def run_baselines_per_customer(
                 .asfreq("D")
                 .fillna(0.0)
             )
+            y_val_series = (
+                Xy_va[["DATE","QUANTITY"]]
+                .set_index("DATE")
+                .sort_index()["QUANTITY"]
+                .asfreq("D")
+                .fillna(0.0)
+            )
+            y_val = y_val_series.to_numpy()
+            horizon = len(y_val)
+
+            # Baseline 1: Naive-1
+            yhat_naive = _naive_last_value(train_series, horizon)
+            rows.append({
+                "CUSTOMER": cust, "fold": f.fold, "anchor": f.meta["anchor"].date(), "model": "Naive-1",
+                "MAE": mae(y_val, yhat_naive), "RMSE": rmse(y_val, yhat_naive), "sMAPE": smape(y_val, yhat_naive),
+                "n": horizon
+            })
+
+            # Baseline 2: Seasonal-7
+            yhat_s7 = _seasonal_weekly(train_series, horizon)
+            rows.append({
+                "CUSTOMER": cust, "fold": f.fold, "anchor": f.meta["anchor"].date(), "model": "Seasonal-7",
+                "MAE": mae(y_val, yhat_s7), "RMSE": rmse(y_val, yhat_s7), "sMAPE": smape(y_val, yhat_s7),
+                "n": horizon
+            })
+
+            # Baseline 3: ETS (classical, no feature matrix)
             yhat_ets = _ets_forecast(train_series, horizon=horizon, seasonal=ets_seasonality, seasonal_periods=7)
             rows.append({
                 "CUSTOMER": cust, "fold": f.fold, "anchor": f.meta["anchor"].date(), "model": f"ETS-{ets_seasonality}",

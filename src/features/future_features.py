@@ -11,10 +11,11 @@ def build_future_features(
     holiday_country: str = "FR",
     holiday_subdiv_map: dict | None = None,
     holiday_window: int = 3,
+    feature_set: str = "full",  # "full" | "deterministic"
 ) -> pd.DataFrame:
     """
     Create the same feature set for future horizon dates using the latest known history.
-    Lags/rolling features are initialized from the tail of history.
+    Lags/rolling features are initialized from the tail of history when feature_set="full".
 
     Args:
         history_df (pd.DataFrame): Historical DataFrame with 'DATE', 'CUSTOMER', and 'QUANTITY' columns.
@@ -29,6 +30,13 @@ def build_future_features(
         pd.DataFrame: DataFrame with future dates and features initialized.
     """
     frames = []
+
+    feature_set = feature_set.lower()
+    if feature_set not in {"full", "deterministic"}:
+        raise ValueError(f"Unsupported feature_set '{feature_set}' (expected 'full' or 'deterministic').")
+
+    include_lags = feature_set == "full"
+    include_rolls = feature_set == "full"
 
     for cust, g in history_df.groupby("CUSTOMER", sort=False):
         # --- ensure proper datetime type ---
@@ -74,12 +82,14 @@ def build_future_features(
                                     subdiv=subdiv, window=holiday_window)
         f = f.join(hfe.drop(columns=["holiday_name"]))
 
-        # --- Placeholder for lag / rolling ---
-        for lag in range(1, max_lag + 1):
-            f[f"lag_{lag}"] = np.nan
-        for w in roll_windows:
-            for stat in ["mean", "std", "min", "max"]:
-                f[f"roll_{stat}_{w}"] = np.nan
+        if include_lags:
+            # --- Placeholder for lag features (filled during recursive predictions) ---
+            for lag in range(1, max_lag + 1):
+                f[f"lag_{lag}"] = np.nan
+        if include_rolls:
+            for w in roll_windows:
+                for stat in ["mean", "std", "min", "max"]:
+                    f[f"roll_{stat}_{w}"] = np.nan
 
         frames.append(f.reset_index().rename(columns={"index": "DATE"}))
 

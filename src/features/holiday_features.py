@@ -62,6 +62,8 @@ def _days_to_next_prev_flag(is_flag: pd.Series) -> pd.DataFrame:
         },
         index=idx,
     )
+    max_gap = len(idx)
+    out = out.replace(np.inf, float(max_gap)).replace(-np.inf, float(max_gap))
     return out
 
 
