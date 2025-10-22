@@ -67,7 +67,8 @@ def run_candidates_per_customer(
     model_matrix_path: str | Path,
     *,
     # CV
-    n_folds: int = 5, window_type: str = "expanding", step_days: int = 7, horizon_days: int = 25, gap_days: int = 0, train_window_days: int = 365,
+    n_folds: int = 5, window_type: str = "expanding", step_days: int = 7, horizon_days: int = 25,
+    gap_days: int = 0, train_window_days: int = 365, initial_train_days: int = 90,
     # features
     max_lag: int = 30, roll_windows: List[int] = [7,14,30], holiday_country: str = "FR", holiday_subdiv_map: Optional[Dict[str,str]] = None, holiday_window: int = 3,
     trim_by_history: bool = True, dropna_mode: str = "none",
@@ -210,9 +211,39 @@ def run_candidates_per_customer(
 
         transform = spec.get("transform", "raw")
         models = spec.get("models", [])
+        cv_cfg = spec.get("cv", {}) or {}
+        cust_window_type = cv_cfg.get("window_type", window_type)
+        cust_train_window_days = cv_cfg.get("train_window_days", train_window_days)
+        cust_step_days = cv_cfg.get("step_days", step_days)
+        cust_gap_days = cv_cfg.get("gap_days", gap_days)
+        cust_horizon_days = cv_cfg.get("horizon_days", horizon_days)
+        cust_n_folds = cv_cfg.get("n_folds", n_folds)
+        cust_initial_train_days = cv_cfg.get("initial_train_days", initial_train_days)
+
+        cust_n_folds = _coerce_int(cust_n_folds, n_folds)
+        cust_step_days = _coerce_int(cust_step_days, step_days)
+        cust_gap_days = _coerce_int(cust_gap_days, gap_days)
+        cust_horizon_days = _coerce_int(cust_horizon_days, horizon_days)
+        cust_initial_train_days = _coerce_int(cust_initial_train_days, initial_train_days)
+        if cust_window_type == "sliding":
+            base_window = train_window_days if train_window_days is not None else 0
+            cust_train_window_days = _coerce_int(cust_train_window_days, base_window)
+            if cust_train_window_days <= 0:
+                raise ValueError(f"Customer {cust} uses sliding CV but train_window_days is not set.")
+        else:
+            cust_train_window_days = None
+
         folds = rolling_time_series_cv(
-            df_c, n_folds=n_folds, window_type=window_type, train_window_days=train_window_days,
-            step_days=step_days, horizon_days=horizon_days, gap_days=gap_days, by_customer=True, min_hist=min_hist
+            df_c,
+            n_folds=cust_n_folds,
+            window_type=cust_window_type,
+            train_window_days=cust_train_window_days,
+            step_days=cust_step_days,
+            horizon_days=cust_horizon_days,
+            gap_days=cust_gap_days,
+            by_customer=True,
+            min_hist=min_hist,
+            initial_train_days=cust_initial_train_days,
         )
 
         if not folds:

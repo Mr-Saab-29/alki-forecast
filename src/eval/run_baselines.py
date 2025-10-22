@@ -105,6 +105,8 @@ def run_baselines_per_customer(
     step_days: int = 7,
     horizon_days: int = 25,
     gap_days: int = 0,
+    initial_train_days: int = 90,
+    cv_overrides: Optional[Dict[str, Dict[str, object]]] = None,
     # Features config
     max_lag: int = 30,
     roll_windows: List[int] = [7, 14, 30],
@@ -140,16 +142,47 @@ def run_baselines_per_customer(
             continue
 
         # Fold generation on the customer's own timeline
+        cfg_cv = (cv_overrides or {}).get(cust, {}) or {}
+        cust_window_type = cfg_cv.get("window_type", window_type)
+        cust_train_window_days = cfg_cv.get("train_window_days", train_window_days)
+        cust_step_days = cfg_cv.get("step_days", step_days)
+        cust_gap_days = cfg_cv.get("gap_days", gap_days)
+        cust_horizon_days = cfg_cv.get("horizon_days", horizon_days)
+        cust_n_folds = cfg_cv.get("n_folds", n_folds)
+        cust_initial_train_days = cfg_cv.get("initial_train_days", initial_train_days)
+
+        def _coerce_int_local(value, default):
+            try:
+                if value is None:
+                    return default
+                return int(value)
+            except Exception:
+                return default
+
+        cust_n_folds = _coerce_int_local(cust_n_folds, n_folds)
+        cust_step_days = _coerce_int_local(cust_step_days, step_days)
+        cust_gap_days = _coerce_int_local(cust_gap_days, gap_days)
+        cust_horizon_days = _coerce_int_local(cust_horizon_days, horizon_days)
+        cust_initial_train_days = _coerce_int_local(cust_initial_train_days, initial_train_days)
+        if cust_window_type == "sliding":
+            base_window = train_window_days if train_window_days is not None else 0
+            cust_train_window_days = _coerce_int_local(cust_train_window_days, base_window)
+            if cust_train_window_days <= 0:
+                raise ValueError(f"Customer {cust} uses sliding CV but train_window_days is not set.")
+        else:
+            cust_train_window_days = None
+
         folds = rolling_time_series_cv(
             df_c,
-            n_folds=n_folds,
-            window_type=window_type,
-            train_window_days=train_window_days,
-            step_days=step_days,
-            horizon_days=horizon_days,
-            gap_days=gap_days,
+            n_folds=cust_n_folds,
+            window_type=cust_window_type,
+            train_window_days=cust_train_window_days,
+            step_days=cust_step_days,
+            horizon_days=cust_horizon_days,
+            gap_days=cust_gap_days,
             by_customer=True,
             min_hist=min_hist,  # ensure lags/rolls are defined
+            initial_train_days=cust_initial_train_days,
         )
         if not folds:
             rows.append({

@@ -23,6 +23,7 @@ class CustomerConfig:
     horizon_days: int = 25
     window_type: str = "expanding"  # or "sliding"
     train_window_days: int | None = None  # for sliding
+    initial_train_days: int = 90
     min_hist_override: int | None = None  # else computed from lags/rolls
 
 def default_customer_config_map() -> Dict[str, CustomerConfig]:
@@ -85,7 +86,8 @@ def make_customer_folds(df_clean: pd.DataFrame, cust: str, cfg: CustomerConfig):
         horizon_days=cfg.horizon_days,
         gap_days=0,
         by_customer=True,     # still true, though there's only one customer now
-        min_hist=min_hist
+        min_hist=min_hist,
+        initial_train_days=cfg.initial_train_days,
     )
     return folds
 

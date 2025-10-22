@@ -1,6 +1,10 @@
 customers:
   ARGALYS:
     transform: raw         # or log1p
+    cv:
+      n_folds: 80
+      step_days: 28
+      initial_train_days: 365
     models:
       - name: ARIMA
         family: arima
@@ -23,6 +27,10 @@ customers:
 
   LES MIRACULEUX:
     transform: log1p
+    cv:
+      n_folds: 120
+      step_days: 28
+      initial_train_days: 365
     models:
       - name: SARIMA_111_111_12
         family: sarima
@@ -42,6 +50,10 @@ customers:
 
   MINCI DELICE:
     transform: log1p
+    cv:
+      n_folds: 140
+      step_days: 28
+      initial_train_days: 365
     models:
       - name: ETS-Mul
         family: ets
@@ -55,6 +67,10 @@ customers:
 
   NUTRAVANCE:
     transform: log1p
+    cv:
+      n_folds: 160
+      step_days: 28
+      initial_train_days: 365
     models:
       - name: ETS-Add
         family: ets

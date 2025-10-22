@@ -136,6 +136,7 @@ def rolling_time_series_cv(
     gap_days: int = 0,               # gap between train end and val start
     by_customer: bool = True,
     min_hist: Optional[int] = None,  # enforce full-feature availability
+    initial_train_days: Optional[int] = 90,  # warm-up length before first fold
 ) -> List[Fold]:
     """
     Build rolling CV folds.
@@ -160,6 +161,7 @@ def rolling_time_series_cv(
         gap_days (int): Gap days between train end and val start.
         by_customer (bool): Whether to create folds per customer or globally.
         min_hist (Optional[int]): Minimum history rows to exclude from start of each customer.
+        initial_train_days (Optional[int]): Warm-up period (in days) before the first anchor.
 
     Returns: List[Fold] with (train_idx, val_idx, meta={cutoffs...})
     """
@@ -210,9 +212,20 @@ def rolling_time_series_cv(
     global_start = df[date_col].min()
     global_end   = df[date_col].max()
 
-    # anchors move from (global_start + something) to (global_end - horizon)
-    # start anchors late enough to allow at least one fold
-    anchor = global_start + pd.Timedelta(days=950)  # heuristic; can be parameterized
+    if initial_train_days is None:
+        init_days = max(0, (min_hist or 0))
+    else:
+        init_days = max(0, int(initial_train_days))
+        if min_hist is not None:
+            init_days = max(init_days, int(min_hist))
+
+    anchor = global_start + pd.Timedelta(days=init_days)
+    latest_anchor = global_end - pd.Timedelta(days=gap_days + horizon_days)
+    if anchor > latest_anchor:
+        anchor = latest_anchor
+    if anchor < global_start:
+        anchor = global_start
+
     k = 1
     while anchor + pd.Timedelta(days=gap_days + horizon_days) <= global_end and k <= n_folds:
         tr_idx, va_idx = _per_customer_indices(anchor)
