@@ -365,8 +365,9 @@ def run_candidates_per_customer(
                             )
                         except AttributeError as e:
                             if "stan_backend" in str(e):
-                                print(f"[WARN] Prophet backend error for {cust}. Skipping Prophet.")
-                                yhat = arima.fit_forecast_ets(s_train, horizon=horizon, trend="add", seasonal="add", sp=7)
+                                yhat = arima.fit_forecast_ets(
+                                    s_train, horizon=horizon, trend="add", seasonal="add", sp=7
+                                )
                             else:
                                 raise
 
