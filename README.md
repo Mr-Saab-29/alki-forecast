@@ -35,6 +35,13 @@ This repository implements a reproducible, end‑to‑end workflow for Alki's de
 
 1. Create and activate a virtual environment (Python ≥ 3.10 recommended).
 2. Install dependencies (for example):
+   Make sure you have uv installed, if not, run the below in the terminal 
+   
+   ```
+   pip install uv
+   ```
+   Then run the below command to install the dependencies
+
    ```bash
    uv sync
    ```

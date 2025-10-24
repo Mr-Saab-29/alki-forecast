@@ -6,27 +6,29 @@ customers:
       step_days: 28
       initial_train_days: 848
     models:
-    - name: ARIMA
-      family: arima
-      params:
-        p: 0
-        d: 1
-        q: 3
-    - name: ETS-Add
-      family: ets
-      params:
-        trend: add
-        seasonal: add
-        sp: 14
-    - name: LGBM
-      family: gbm
-      params:
-        learning_rate: 0.0828666107945118
-        max_depth: 6
-        n_estimators: 369
-        subsample: 0.8141624986557301
-        colsample_bytree: 0.7007345119267544
-      use_lightgbm: true
+      - name: ARIMA
+        family: arima
+        params:
+          p: 0
+          d: 1
+          q: 3
+      - name: ETS-Add
+        family: ets
+        params:
+          trend: add
+          seasonal: add
+          sp: 14
+      - name: LGBM
+        family: gbm
+        params:
+          learning_rate: 0.0828666107945118
+          max_depth: 6
+          n_estimators: 369
+          subsample: 0.8141624986557301
+          colsample_bytree: 0.7007345119267544
+          verbose: -1          
+        use_lightgbm: true
+
   LES MIRACULEUX:
     transform: log1p
     cv:
@@ -34,30 +36,32 @@ customers:
       step_days: 28
       initial_train_days: 1079
     models:
-    - name: SARIMA_111_111_12
-      family: sarima
-      params:
-        p: 0
-        d: 2
-        q: 3
-        P: 2
-        D: 0
-        Q: 0
-        sp: 12
-    - name: ProphetMul
-      family: prophet
-      params:
-        seasonality_mode: multiplicative
-        changepoint_prior_scale: 0.13763788830949814
-    - name: LGBM
-      family: gbm
-      params:
-        learning_rate: 0.14297706619629436
-        max_depth: 3
-        n_estimators: 205
-        subsample: 0.8000530238682816
-        colsample_bytree: 0.9130039955813294
-      use_lightgbm: true
+      - name: SARIMA_111_111_12
+        family: sarima
+        params:
+          p: 0
+          d: 2
+          q: 3
+          P: 2
+          D: 0
+          Q: 0
+          sp: 12
+      - name: ProphetMul
+        family: prophet
+        params:
+          seasonality_mode: multiplicative
+          changepoint_prior_scale: 0.13763788830949814
+      - name: LGBM
+        family: gbm
+        params:
+          learning_rate: 0.14297706619629436
+          max_depth: 3
+          n_estimators: 205
+          subsample: 0.8000530238682816
+          colsample_bytree: 0.9130039955813294
+          verbose: -1          
+        use_lightgbm: true
+
   MINCI DELICE:
     transform: log1p
     cv:
@@ -65,27 +69,38 @@ customers:
       step_days: 28
       initial_train_days: 1879
     models:
-    - name: ETS-Mul
-      family: ets
-      params:
-        trend: add
-        seasonal: mul
-        sp: 21
-    - name: SARIMA_weekly
-      family: sarima
-      params:
-        p: 1
-        d: 0
-        q: 0
-        P: 1
-        D: 1
-        Q: 1
-        sp: 7
-    - name: ProphetMul
-      family: prophet
-      params:
-        seasonality_mode: multiplicative
-        changepoint_prior_scale: 0.1025827329856989
+      - name: ETS-Mul
+        family: ets
+        params:
+          trend: add
+          seasonal: mul
+          sp: 21
+      - name: SARIMA_weekly
+        family: sarima
+        params:
+          p: 1
+          d: 0
+          q: 0
+          P: 1
+          D: 1
+          Q: 1
+          sp: 7
+      - name: ProphetMul
+        family: prophet
+        params:
+          seasonality_mode: multiplicative
+          changepoint_prior_scale: 0.1025827329856989
+      - name: LGBM
+        family: gbm
+        params:
+          learning_rate: 0.14456623868428736
+          max_depth: 4
+          n_estimators: 675
+          subsample: 0.7123188418815422
+          colsample_bytree: 0.8158550585007485
+          verbose: -1          
+        use_lightgbm: true
+
   NUTRAVANCE:
     transform: log1p
     cv:
@@ -93,28 +108,29 @@ customers:
       step_days: 28
       initial_train_days: 2645
     models:
-    - name: ETS-Add
-      family: ets
-      params:
-        trend: add
-        seasonal: add
-        sp: 15
-    - name: SARIMA_101_111_7
-      family: sarima
-      params:
-        p: 1
-        d: 0
-        q: 0
-        P: 1
-        D: 1
-        Q: 1
-        sp: 7
-    - name: LGBM
-      family: gbm
-      params:
-        learning_rate: 0.14456623868428736
-        max_depth: 4
-        n_estimators: 675
-        subsample: 0.7123188418815422
-        colsample_bytree: 0.8158550585007485
-      use_lightgbm: true
+      - name: ETS-Add
+        family: ets
+        params:
+          trend: add
+          seasonal: add
+          sp: 15
+      - name: SARIMA_101_111_7
+        family: sarima
+        params:
+          p: 1
+          d: 0
+          q: 0
+          P: 1
+          D: 1
+          Q: 1
+          sp: 7
+      - name: LGBM
+        family: gbm
+        params:
+          learning_rate: 0.14456623868428736
+          max_depth: 4
+          n_estimators: 675
+          subsample: 0.7123188418815422
+          colsample_bytree: 0.8158550585007485
+          verbose: -1          
+        use_lightgbm: true
