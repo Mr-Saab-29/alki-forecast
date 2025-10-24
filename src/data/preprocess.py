@@ -212,11 +212,11 @@ def preprocess_all_customers(
     df: pd.DataFrame,
     *,
     gap_limit: int = 7,
-    long_gap_days: int = 60,   
+    long_gap_days: int = 30,   
     min_active_days: int = 30,
-    causal: bool = True,
-    verbose: bool = False,
-    min_nonzero_run: int = 7,
+    causal: bool = False,
+    verbose: bool = True,
+    min_nonzero_run: int = 5,
     min_nonzero_value: float = 1.0,
 ) -> Tuple[pd.DataFrame, pd.DataFrame]:
     """Batch apply the cleaner to every customer.

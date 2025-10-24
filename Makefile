@@ -1,4 +1,5 @@
-PYTHON=python
+PYTHON=uv run python
+RAW_DATA=data/raw/train set.csv
 DATA=data/processed/cleaned_data.csv
 BASE_CONFIG=configs/model_matrix.yaml
 TUNED_CONFIG=configs/model_matrix_tuned.yaml
@@ -8,6 +9,11 @@ MODELS_DIR=outputs/models
 PLOTS_DIR=outputs/plots
 
 .PHONY: eda tune train forecast plots all clean
+
+preprocess:
+	@echo "Running preprocessing..."
+	$(PYTHON) -m src.pipeline.run_preprocess --raw-path "$(RAW_DATA)" --output-path $(DATA)
+	@echo "Preprocessing completed. Cleaned data at $(DATA)."
 
 eda:
 	@echo "Running EDA..."
@@ -41,7 +47,7 @@ plots:
 	$(PYTHON) -m src.pipeline.plot_forecasts --data-path $(DATA) --forecast-path $(FORECAST_CSV) --output-dir $(PLOTS_DIR)
 	@echo "Plots created. Saved to $(PLOTS_DIR)."
 
-all: eda train forecast plots
+all: preprocess eda train forecast plots
 
 clean:
 	rm -rf outputs/models outputs/forecasts outputs/plots outputs/cv outputs/reports outputs/tuning
