@@ -84,6 +84,36 @@ def run_candidates_per_customer(
     Run candidate models per customer over rolling CV folds as specified in model_matrix_path.
     Returns (per_fold_df, summary_df, peak_metrics_df, best_models_df). Optionally writes CSVs and
     a tuned YAML with the composite-best model per customer.
+
+    Args:
+        df_clean (pd.DataFrame): Cleaned input DataFrame with columns CUSTOMER, DATE, QUANTITY.
+        model_matrix_path (str | Path): Path to YAML file specifying candidate models per customer.
+        n_folds (int): Number of CV folds.
+        window_type (str): Type of CV window ('expanding' or 'sliding').
+        step_days (int): Step size in days between folds.
+        horizon_days (int): Forecast horizon in days.
+        gap_days (int): Gap days between training and validation.
+        train_window_days (int): Training window size in days (for sliding window).
+        initial_train_days (int): Minimum initial training days before first fold.
+        max_lag (int): Maximum lag for feature engineering.
+        roll_windows (List[int]): List of rolling window sizes for features.
+        holiday_country (str): Country code for holiday features.
+        holiday_subdiv_map (Optional[Dict[str,str]]): Mapping of CUSTOMER to holiday subdivision.
+        holiday_window (int): Window size for holiday effect smoothing.
+        trim_by_history (bool): Whether to trim features by history.
+        dropna_mode (str): Mode for dropping NA values in features.
+        out_dir (str | Path): Output directory to save results.
+        save_csv (bool): Whether to save output DataFrames as CSV files.
+        composite_weights (Tuple[float, float, float]): Weights for (MAE, RMSE, sMAPE) in composite score.
+        best_yaml_path (str | Path | None): Path to save best models YAML; if None, defaults to out_dir/best_models_composite.yaml.
+        write_best_yaml (bool): Whether to write the best models YAML file.
+    
+    Returns:
+        Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+            - per_fold_df: DataFrame with per-fold metrics for all candidates.
+            - summary_df: DataFrame with average metrics per customer and model.
+            - peak_metrics_df: DataFrame with peak metrics for predictions.
+            - best_models_df: DataFrame with the best model per customer based on composite score.
     """
     def _log_error(cust, fold, model, err, rows, horizon, anchor=None):
         msg = f"[ERROR] {cust} | Fold {fold} | Model: {model} → {type(err).__name__}: {err}"

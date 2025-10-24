@@ -41,7 +41,18 @@ def _sample_random(params: Dict[str, Any], n: int, rng: random.Random) -> List[D
     return out
 
 def _param_variants(model_cfg: Dict[str, Any], search: str, n_trials: int, seed: int) -> List[Dict[str, Any]]:
-    """Return a list of concrete param dicts for this model entry."""
+    """Return a list of concrete param dicts for this model entry.
+    
+    Args:
+        model_cfg: model config dict from YAML (with 'params' or 'grid')
+        search: "grid" or "random"
+        n_trials: number of random trials (if search=="random")
+        seed: random seed for reproducibility 
+    
+    Returns: 
+        List of param dicts to try
+    
+    """
     rng = random.Random(seed)
     # Prefer 'grid' if present, else 'params'
     space = model_cfg.get("grid", model_cfg.get("params", {}))
@@ -101,6 +112,22 @@ def tune_per_customer(
     Try param variants per customer/model using your existing rolling-CV evaluator,
     select the best by `metric` (lower is better), and write a *new YAML* with those best params.
     Returns (per_fold_results, summary, best_cfg_dict).
+
+    Args:
+        df_clean: cleaned DataFrame with actuals
+        base_yaml_path: path to base model-matrix YAML
+        search: "grid" or "random"
+        n_trials: number of random trials (if search=="random")
+        metric: metric name to pick best (lower is better)
+        out_yaml_path: path to write tuned YAML
+        cv_defaults: optional dict of CV overrides to pass to runner
+        features_defaults: optional dict of feature-engineering overrides to pass to runner
+    
+    Returns:
+        per_fold_best: DataFrame of per-fold results using best params
+        summary_best: DataFrame of summary results using best params
+        best_cfg: Dict representing the best model-matrix YAML
+        
     """
     base_cfg = yaml.safe_load(Path(base_yaml_path).read_text())
 

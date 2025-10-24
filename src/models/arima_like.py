@@ -15,6 +15,18 @@ def fit_forecast_sarima(
     Fit and forecast using SARIMA model.
     Seasonal order is (P,D,Q,sp).
     Fallback to last value if fitting fails.
+
+    Args:
+        train: training time series
+        horizon: forecast horizon
+        p,d,q: ARIMA orders
+        P,D,Q,sp: seasonal ARIMA orders
+        exog_train: optional exogenous variables for training period
+        exog_future: optional exogenous variables for forecast period
+    
+    Returns:
+        Forecasted values as numpy array
+
     """
     model = SARIMAX(
         train.astype(float),
@@ -42,6 +54,16 @@ def fit_forecast_arima(
     """
     Fit and forecast using ARIMA model (non-seasonal).
     Fallback to last value if fitting fails.
+
+    Args:
+        train: training time series
+        horizon: forecast horizon
+        p,d,q: ARIMA orders
+        exog_train: optional exogenous variables for training period
+        exog_future: optional exogenous variables for forecast period
+    
+    Returns:
+        Forecasted values as numpy array
     """
     model = SARIMAX(
         train.astype(float),
@@ -62,6 +84,17 @@ def fit_forecast_ets(train: pd.Series, horizon: int, *, trend:str="add", seasona
     """
     Fit and forecast using Holt–Winters ETS model.
     seasonal ∈ {"add","mul"}.
+
+    Args:
+        train: training time series
+        horizon: forecast horizon
+        trend: trend component type
+        seasonal: seasonal component type
+        sp: seasonal periods
+    
+    Returns:
+        Forecasted values as numpy array
+        
     """
     m = ExponentialSmoothing(
         train.astype(float),

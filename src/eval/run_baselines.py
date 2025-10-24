@@ -10,6 +10,7 @@ from src.features.build_features import build_features
 
 # Metrics
 def smape(y_true, y_pred, eps: float = 1e-8) -> float:
+    """Symmetric Mean Absolute Percentage Error."""
     y_true = np.asarray(y_true, dtype=float)
     y_pred = np.asarray(y_pred, dtype=float)
     num = np.abs(y_pred - y_true)
@@ -17,15 +18,24 @@ def smape(y_true, y_pred, eps: float = 1e-8) -> float:
     return float(100.0 * np.mean(2.0 * num / den))
 
 def mae(y_true, y_pred) -> float:
+    """Mean Absolute Error."""
     return float(np.mean(np.abs(np.asarray(y_true) - np.asarray(y_pred))))
 
 def rmse(y_true, y_pred) -> float:
+    """Root Mean Squared Error."""
     e = np.asarray(y_true) - np.asarray(y_pred)
     return float(np.sqrt(np.mean(e**2)))
 
 # Baseline Models
 def _naive_last_value(train_series: pd.Series, horizon: int) -> np.ndarray:
-    """Forecast horizon steps using the last observed level from the training series."""
+    """Forecast horizon steps using the last observed level from the training series.
+    
+    Args:
+        train_series: pd.Series of historical values (may contain NaNs).
+        horizon: int, number of steps to forecast.
+    Returns:
+        np.ndarray of shape (horizon,) with the forecasted values.
+    """
     if train_series.empty:
         return np.zeros(horizon, dtype=float)
     last = float(train_series.dropna().iloc[-1]) if not train_series.dropna().empty else 0.0
@@ -35,6 +45,13 @@ def _seasonal_weekly(train_series: pd.Series, horizon: int) -> np.ndarray:
     """
     Weekly seasonal naïve: repeat the most recent 7-day pattern from the training series.
     Falls back to last-value if fewer than 7 non-NaN observations exist.
+
+    Args:
+        train_series: pd.Series of historical values (may contain NaNs).
+        horizon: int, number of steps to forecast.
+    
+    Returns:
+        np.ndarray of shape (horizon,) with the forecasted values.
     """
     values = train_series.dropna().to_numpy(dtype=float)
     if values.size == 0:
@@ -56,6 +73,16 @@ def _ets_forecast(
     """
     Holt–Winters ETS forecast. seasonal ∈ {"add","mul"}.
     Fallback to last value if fitting fails.
+
+    Args:
+        train_series: pd.Series of historical values (may contain NaNs).
+        horizon: int, number of steps to forecast.
+        seasonal: str, "add" or "mul" for seasonal component.
+        seasonal_periods: int, number of periods in a seasonal cycle.
+    
+    Returns:
+        np.ndarray of shape (horizon,) with the forecasted values.
+
     """
     try:
         model = ExponentialSmoothing(
@@ -122,6 +149,29 @@ def run_baselines_per_customer(
     """
     Run Naive-1, Seasonal-7, and ETS(Add/Mul) per customer over rolling CV folds.
     Returns (per_fold_df, summary_df). Optionally writes CSVs to out_dir.
+
+    Args:
+        df_clean: pd.DataFrame with columns ["CUSTOMER","DATE","QUANTITY"].
+        n_folds: int, number of CV folds.
+        window_type: str, "expanding" or "sliding".
+        train_window_days: int, for sliding window, size of training window in days.
+        step_days: int, number of days to step forward for each fold.
+        horizon_days: int, forecast horizon in days.
+        gap_days: int, gap between training end and validation start in days.
+        initial_train_days: int, minimum initial training period in days.
+        cv_overrides: optional dict mapping CUSTOMER to dict of CV params to override.
+        max_lag: int, maximum lag feature to build.
+        roll_windows: list of int, rolling window sizes for features.
+        holiday_country: str, country code for holiday features.
+        holiday_subdiv_map: optional dict mapping CUSTOMER to holiday subdivision code.
+        holiday_window: int, window size for holiday features.
+        trim_by_history: bool, whether to trim features by history availability.
+        dropna_mode: str, how to handle NaNs in feature building.
+        out_dir: str or Path, directory to save output CSVs.
+        save_csv: bool, whether to save per-fold and summary CSVs.
+    
+    Returns:
+        Tuple of (per_fold_df, summary_df).
     """
     df = df_clean.copy()
     if not np.issubdtype(df["DATE"].dtype, np.datetime64):

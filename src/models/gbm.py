@@ -59,6 +59,20 @@ def fit_predict_gbm_recursive(
     - Ensures feature parity between train and prediction.
 
     Assumes `train_df` is a **single-customer** slice with columns DATE,CUSTOMER,QUANTITY.
+
+    Args:
+        train_df: training DataFrame with actuals
+        build_features_fn: function to build training features from DataFrame
+        build_future_features_fn: function to build deterministic future template from DataFrame
+        horizon: forecast horizon
+        params: GBM model parameters
+        transform: target transformation ("raw" or "log1p")
+        use_lightgbm: whether to use LightGBM (else XGBoost)
+        max_lag: maximum lag to use for features
+        roll_windows: list of rolling window sizes for stats features
+    
+    Returns:
+        Forecasted values as numpy array of shape (horizon,)
     """
     # 1) Build training design
     Xy_tr = build_features_fn(train_df)

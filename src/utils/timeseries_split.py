@@ -8,9 +8,11 @@ DateLike = pd.Timestamp | str
 
 def compute_min_hist(max_lag: int, roll_windows: List[int]) -> int:
     """Minimal rows of history needed so all lag/rolling features are defined.
+
     Args:
         max_lag (int): Maximum lag to create.
         roll_windows (List[int]): List of window sizes for rolling means.
+
     Returns:
         int: Minimum history length required."""
     longest = max(roll_windows) if roll_windows else 0
@@ -49,6 +51,7 @@ def temporal_train_test_split(
 
     Returns: 
         Tuple[pd.DataFrame, pd.DataFrame]: (train DataFrame, test DataFrame)
+
     """
     df = df.copy()
     df[date_col] = pd.to_datetime(df[date_col], errors="coerce")
@@ -163,7 +166,9 @@ def rolling_time_series_cv(
         min_hist (Optional[int]): Minimum history rows to exclude from start of each customer.
         initial_train_days (Optional[int]): Warm-up period (in days) before the first anchor.
 
-    Returns: List[Fold] with (train_idx, val_idx, meta={cutoffs...})
+    Returns:
+        List[Fold] with (train_idx, val_idx, meta={cutoffs...})
+
     """
     if window_type == "sliding" and not train_window_days:
         raise ValueError("train_window_days must be provided for sliding windows.")
@@ -271,8 +276,10 @@ def add_split_flag(df: pd.DataFrame, idx_train: np.ndarray, idx_val: np.ndarray,
         idx_train (np.ndarray): Integer positions for training set.
         idx_val (np.ndarray): Integer positions for validation set.
         col (str): Name of the column to add.  
+
     Returns:
         pd.DataFrame: DataFrame with added split flag column.
+        
     """
     out = df.copy()
     out[col] = "unused"

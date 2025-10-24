@@ -14,6 +14,17 @@ def plot_customer(
     output_dir: Path,
     history_days: int,
 ) -> None:
+    """Plot actuals and forecast quantiles for a single customer.
+    Args:
+        df_clean: Cleaned historical data.
+        forecast_df: Forecast quantiles data.
+        customer: Customer name to plot.
+        output_dir: Directory to save the plot.
+        history_days: Number of days of history to show before forecast horizon.
+    
+    Returns:
+        None
+    """
     hist = (
         df_clean[df_clean["CUSTOMER"] == customer]
         .sort_values("DATE")

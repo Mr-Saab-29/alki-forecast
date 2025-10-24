@@ -7,6 +7,15 @@ import pandas as pd
 
 
 def build_eda(df: pd.DataFrame) -> pd.DataFrame:
+    """Build a simple EDA summary DataFrame.
+    
+    Args:
+        df: Input cleaned DataFrame with at least 'CUSTOMER', 'DATE', and 'QUANTITY' columns.
+
+    Returns:
+        DataFrame with EDA summary statistics per customer.
+        
+    """
     df = df.copy()
     df["DATE"] = pd.to_datetime(df["DATE"], errors="coerce")
     df = df.dropna(subset=["DATE"])

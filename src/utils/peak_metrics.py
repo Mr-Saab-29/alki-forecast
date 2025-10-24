@@ -5,6 +5,7 @@ import pandas as pd
 
 
 def _smape(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    """Compute symmetric Mean Absolute Percentage Error (sMAPE)."""
     num = np.abs(y_pred - y_true)
     den = np.abs(y_true) + np.abs(y_pred)
     return float(200.0 * np.mean(num / (den + 1e-8)))

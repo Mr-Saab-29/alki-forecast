@@ -240,6 +240,17 @@ def save_models_and_forecast(
     Fit the best models per customer, save them to disk, and generate
     21-day forecasts with P10/P50/P90 quantiles using a simple residual-based
     normal approximation.
+
+    Args:
+        df_clean: Cleaned historical data.
+        best_yaml_path: Path to YAML file with best model specifications per customer.
+        horizon: Forecast horizon in days (default: 21).
+        models_dir: Directory to save the fitted models (default: "outputs/models").
+        forecasts_path: Path to save the forecast quantiles CSV (default: "outputs/forecasts/forecast_quantiles.csv").
+        quantile_z: Z-score for quantile calculation (default: 1.2815515655446004 for 10th/90th percentiles).
+    
+    Returns:
+        DataFrame with forecast quantiles for all customers.
     """
     cfg = yaml.safe_load(Path(best_yaml_path).read_text())
     models_dir = Path(models_dir)

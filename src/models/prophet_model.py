@@ -12,6 +12,18 @@ def fit_forecast_prophet(
 ) -> np.ndarray:
     """
     Fit Facebook Prophet on a pandas Series with a DatetimeIndex and forecast horizon steps.
+
+    Args:
+        train: training time series
+        horizon: forecast horizon
+        seasonality_mode: "additive" or "multiplicative"
+        changepoint_prior_scale: flexibility of trend changepoints
+        exog_train: optional exogenous variables for training period
+        exog_future: optional exogenous variables for forecast period
+    
+    Returns:
+        Forecasted values as numpy array
+        
     """
     from prophet import Prophet
 
