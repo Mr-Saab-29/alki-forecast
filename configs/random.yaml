@@ -1,0 +1,123 @@
+customers:
+  ARGALYS:
+    transform: raw
+    cv:
+      n_folds: 7
+      step_days: 28
+      initial_train_days: 848
+    models:
+      - name: ARIMA
+        family: arima
+        grid:
+          p: {min: 0, max: 3, type: int}
+          d: {min: 0, max: 2, type: int}
+          q: {min: 0, max: 3, type: int}
+      - name: ETS-Add
+        family: ets
+        grid:
+          trend: ["add"]
+          seasonal: ["add"]
+          sp: {min: 7, max: 21, type: int}
+      - name: LGBM
+        family: gbm
+        grid:
+          learning_rate: {min: 0.03, max: 0.15, type: float}
+          max_depth: {min: 3, max: 8, type: int}
+          n_estimators: {min: 200, max: 800, type: int}
+          subsample: {min: 0.7, max: 1.0, type: float}
+          colsample_bytree: {min: 0.7, max: 1.0, type: float}
+        use_lightgbm: true
+
+  LES MIRACULEUX:
+    transform: log1p
+    cv:
+      n_folds: 7
+      step_days: 28
+      initial_train_days: 1079
+    models:
+      - name: SARIMA_111_111_12
+        family: sarima
+        grid:
+          p: {min: 0, max: 3, type: int}
+          d: {min: 0, max: 2, type: int}
+          q: {min: 0, max: 3, type: int}
+          P: {min: 0, max: 2, type: int}
+          D: {min: 0, max: 2, type: int}
+          Q: {min: 0, max: 2, type: int}
+          sp: [12]
+      - name: ProphetMul
+        family: prophet
+        grid:
+          seasonality_mode: ["multiplicative"]
+          changepoint_prior_scale: {min: 0.05, max: 0.8, type: float}
+      - name: LGBM
+        family: gbm
+        grid:
+          learning_rate: {min: 0.03, max: 0.15, type: float}
+          max_depth: {min: 3, max: 8, type: int}
+          n_estimators: {min: 200, max: 800, type: int}
+          subsample: {min: 0.7, max: 1.0, type: float}
+          colsample_bytree: {min: 0.7, max: 1.0, type: float}
+        use_lightgbm: true
+
+  MINCI DELICE:
+    transform: log1p
+    cv:
+      n_folds: 7
+      step_days: 28
+      initial_train_days: 1879
+    models:
+      - name: ETS-Mul
+        family: ets
+        grid:
+          trend: ["add", "mul"]
+          seasonal: ["mul"]
+          sp: {min: 7, max: 21, type: int}
+      - name: SARIMA_weekly
+        family: sarima
+        grid:
+          p: {min: 0, max: 2, type: int}
+          d: {min: 0, max: 2, type: int}
+          q: {min: 0, max: 2, type: int}
+          P: {min: 0, max: 2, type: int}
+          D: {min: 0, max: 2, type: int}
+          Q: {min: 0, max: 2, type: int}
+          sp: [7]
+      - name: ProphetMul
+        family: prophet
+        grid:
+          seasonality_mode: ["multiplicative"]
+          changepoint_prior_scale: {min: 0.05, max: 0.5, type: float}
+
+  NUTRAVANCE:
+    transform: log1p
+    cv:
+      n_folds: 7
+      step_days: 28
+      initial_train_days: 2645
+    models:
+      - name: ETS-Add
+        family: ets
+        grid:
+          trend: ["add"]
+          seasonal: ["add"]
+          sp: {min: 7, max: 21, type: int}
+      - name: SARIMA_101_111_7
+        family: sarima
+        grid:
+          p: {min: 0, max: 2, type: int}
+          d: {min: 0, max: 2, type: int}
+          q: {min: 0, max: 2, type: int}
+          P: {min: 0, max: 2, type: int}
+          D: {min: 0, max: 2, type: int}
+          Q: {min: 0, max: 2, type: int}
+          sp: [7]
+      - name: LGBM
+        family: gbm
+        grid:
+          learning_rate: {min: 0.03, max: 0.15, type: float}
+          max_depth: {min: 3, max: 8, type: int}
+          n_estimators: {min: 200, max: 800, type: int}
+          subsample: {min: 0.7, max: 1.0, type: float}
+          colsample_bytree: {min: 0.7, max: 1.0, type: float}
+        use_lightgbm: true
