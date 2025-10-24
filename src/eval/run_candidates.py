@@ -1,5 +1,6 @@
 # src/eval/run_candidates.py
 from __future__ import annotations
+import copy
 import numpy as np, pandas as pd, yaml
 from pathlib import Path
 from typing import Dict, Tuple, Optional, List
@@ -12,6 +13,7 @@ from src.models import arima_like as arima
 from src.models.prophet_model import fit_forecast_prophet
 from src.models.gbm import fit_predict_gbm_recursive
 from src.eval.run_baselines import mae, rmse, smape
+from src.utils.peak_metrics import compute_peak_metrics
 
 def _build_features(
     df_slice,
@@ -74,10 +76,14 @@ def run_candidates_per_customer(
     trim_by_history: bool = True, dropna_mode: str = "none",
     # output
     out_dir: str | Path = "outputs/cv/candidates", save_csv: bool = True,
-) -> Tuple[pd.DataFrame, pd.DataFrame]:
+    composite_weights: Tuple[float, float, float] = (0.3, 0.5, 0.2),
+    best_yaml_path: str | Path | None = None,
+    write_best_yaml: bool = True,
+) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     """
     Run candidate models per customer over rolling CV folds as specified in model_matrix_path.
-    Returns (per_fold_df, summary_df). Optionally writes CSVs to out_dir.
+    Returns (per_fold_df, summary_df, peak_metrics_df, best_models_df). Optionally writes CSVs and
+    a tuned YAML with the composite-best model per customer.
     """
     def _log_error(cust, fold, model, err, rows, horizon, anchor=None):
         msg = f"[ERROR] {cust} | Fold {fold} | Model: {model} → {type(err).__name__}: {err}"
@@ -202,7 +208,8 @@ def run_candidates_per_customer(
     out_path.mkdir(parents=True, exist_ok=True)
     min_hist = compute_min_hist(max_lag, roll_windows)
 
-    rows = []
+    rows: list[dict] = []
+    detail_rows: list[pd.DataFrame] = []
 
     for cust, spec in cfg["customers"].items():
         df_c = df[df["CUSTOMER"] == cust].reset_index(drop=True)
@@ -252,67 +259,56 @@ def run_candidates_per_customer(
 
         for f in folds:
             train_df = select_by_index(df_c, f.train_idx)
-            val_df   = select_by_index(df_c, f.val_idx)
+            val_df = select_by_index(df_c, f.val_idx)
 
             s_train = _to_series(train_df)
             horizon = val_df["DATE"].nunique()
 
-            exog_cache: Optional[Tuple[pd.DataFrame, pd.DataFrame]] = None
+            feats_tr = _build_features(
+                train_df,
+                max_lag=max_lag,
+                roll_windows=roll_windows,
+                holiday_country=holiday_country,
+                holiday_subdiv_map=holiday_subdiv_map,
+                holiday_window=holiday_window,
+                trim_by_history=False,
+                dropna_mode="none",
+                feature_set="deterministic",
+            )
+            exog_cols = [c for c in feats_tr.columns if c not in {"DATE", "CUSTOMER", "QUANTITY"}]
+            feats_tr = feats_tr.set_index("DATE").sort_index().reindex(s_train.index)
+            exog_tr = feats_tr[exog_cols].fillna(0.0).replace([np.inf, -np.inf], 0.0)
 
-            def _get_exog_frames() -> Tuple[pd.DataFrame, pd.DataFrame]:
-                nonlocal exog_cache
-                if exog_cache is None:
-                    feats_tr = _build_features(
-                        train_df,
-                        max_lag=max_lag,
-                        roll_windows=roll_windows,
-                        holiday_country=holiday_country,
-                        holiday_subdiv_map=holiday_subdiv_map,
-                        holiday_window=holiday_window,
-                        trim_by_history=False,
-                        dropna_mode="none",
-                        feature_set="deterministic",
-                    )
-                    exog_cols = [c for c in feats_tr.columns if c not in {"DATE", "CUSTOMER", "QUANTITY"}]
-                    feats_tr = (
-                        feats_tr.set_index("DATE")
-                        .sort_index()
-                        .reindex(s_train.index)
-                    )
-                    exog_tr = feats_tr[exog_cols].fillna(0.0)
-                    exog_tr = exog_tr.replace([np.inf, -np.inf], 0.0)
+            fut_feats = build_future_features(
+                train_df,
+                horizon=horizon,
+                max_lag=max_lag,
+                roll_windows=roll_windows,
+                holiday_country=holiday_country,
+                holiday_subdiv_map=holiday_subdiv_map,
+                holiday_window=holiday_window,
+                feature_set="deterministic",
+            )
+            fut_feats = fut_feats.set_index("DATE").sort_index()
+            exog_fut = fut_feats.reindex(columns=exog_cols).fillna(0.0).replace([np.inf, -np.inf], 0.0)
 
-                    fut_feats = build_future_features(
-                        train_df,
-                        horizon=horizon,
-                        max_lag=max_lag,
-                        roll_windows=roll_windows,
-                        holiday_country=holiday_country,
-                        holiday_subdiv_map=holiday_subdiv_map,
-                        holiday_window=holiday_window,
-                        feature_set="deterministic",
-                    )
-                    fut_feats = fut_feats.set_index("DATE").sort_index()
-                    exog_fut = fut_feats.reindex(columns=exog_cols).fillna(0.0)
-                    exog_fut = exog_fut.replace([np.inf, -np.inf], 0.0)
-                    exog_cache = (exog_tr, exog_fut)
-                return exog_cache
+            exog_tr_arr = None if exog_tr.empty else exog_tr.to_numpy()
+            exog_fut_arr = None if exog_fut.empty else exog_fut.to_numpy()
+
+            dates_sorted = val_df.sort_values("DATE")
+            y_true = dates_sorted["QUANTITY"].to_numpy()
+            dates_array = dates_sorted["DATE"].to_numpy()
 
             for m in models:
-                name   = m["name"]
+                name = m["name"]
                 family = m["family"]
-                params = m.get("params", {})
+                params = m.get("params", {}).copy()
 
                 try:
                     if family == "arima":
-                        grid = m.get("grid")
-                        params = _pick_sanitized("arima", grid, params)
-
+                        params = _pick_sanitized("arima", m.get("grid"), params)
                         y_tr = _apply_transform(s_train.values, transform, inverse=False)
                         s_tr = pd.Series(y_tr, index=s_train.index)
-                        exog_tr, exog_fut = _get_exog_frames()
-                        exog_tr_arr = None if exog_tr.empty or exog_tr.shape[1] == 0 else exog_tr.to_numpy()
-                        exog_fut_arr = None if exog_fut.empty or exog_fut.shape[1] == 0 else exog_fut.to_numpy()
                         yhat = arima.fit_forecast_arima(
                             s_tr,
                             horizon=horizon,
@@ -324,13 +320,9 @@ def run_candidates_per_customer(
 
                     elif family == "sarima":
                         params = _pick_sanitized("sarima", None, params)
-
                         y_tr = _apply_transform(s_train.values, transform, inverse=False)
                         s_tr = pd.Series(y_tr, index=s_train.index)
                         try:
-                            exog_tr, exog_fut = _get_exog_frames()
-                            exog_tr_arr = None if exog_tr.empty or exog_tr.shape[1] == 0 else exog_tr.to_numpy()
-                            exog_fut_arr = None if exog_fut.empty or exog_fut.shape[1] == 0 else exog_fut.to_numpy()
                             yhat = arima.fit_forecast_sarima(
                                 s_tr,
                                 horizon=horizon,
@@ -339,7 +331,6 @@ def run_candidates_per_customer(
                                 **params,
                             )
                         except Exception:
-                            # robust weekly fallback if configured spec fails at runtime
                             yhat = arima.fit_forecast_sarima(
                                 s_tr,
                                 horizon=horizon,
@@ -362,11 +353,9 @@ def run_candidates_per_customer(
                         yhat = _apply_transform(yhat, transform, inverse=True)
 
                     elif family == "prophet":
-                        # Prophet fallback if CmdStan or backend issue
                         try:
-                            exog_tr, exog_fut = _get_exog_frames()
-                            exog_tr_df = None if exog_tr.empty or exog_tr.shape[1] == 0 else exog_tr
-                            exog_fut_df = None if exog_fut.empty or exog_fut.shape[1] == 0 else exog_fut
+                            exog_tr_df = None if exog_tr.empty else exog_tr
+                            exog_fut_df = None if exog_fut.empty else exog_fut
                             yhat = fit_forecast_prophet(
                                 s_train,
                                 horizon=horizon,
@@ -377,7 +366,6 @@ def run_candidates_per_customer(
                         except AttributeError as e:
                             if "stan_backend" in str(e):
                                 print(f"[WARN] Prophet backend error for {cust}. Skipping Prophet.")
-                                from src.models.arima_like import fit_forecast_ets
                                 yhat = arima.fit_forecast_ets(s_train, horizon=horizon, trend="add", seasonal="add", sp=7)
                             else:
                                 raise
@@ -404,23 +392,37 @@ def run_candidates_per_customer(
                     else:
                         raise ValueError(f"Unknown model family: {family}")
 
-                    y_true = val_df.sort_values("DATE")["QUANTITY"].to_numpy()
+                    metric_mae = mae(y_true, yhat)
+                    metric_rmse = rmse(y_true, yhat)
+                    metric_smape = smape(y_true, yhat)
+
                     rows.append({
                         "CUSTOMER": cust,
                         "fold": f.fold,
                         "anchor": f.meta["anchor"].date(),
                         "model": name,
-                        "MAE": mae(y_true, yhat),
-                        "RMSE": rmse(y_true, yhat),
-                        "sMAPE": smape(y_true, yhat),
+                        "MAE": metric_mae,
+                        "RMSE": metric_rmse,
+                        "sMAPE": metric_smape,
                         "n": horizon,
                     })
+
+                    detail_rows.append(pd.DataFrame({
+                        "CUSTOMER": cust,
+                        "model": name,
+                        "family": family,
+                        "fold": f.fold,
+                        "DATE": dates_array,
+                        "y_true": y_true,
+                        "y_pred": yhat,
+                    }))
 
                 except Exception as e:
                     _log_error(cust, f.fold, name, e, rows, horizon, anchor=f.meta["anchor"].date())
 
     # Convert to DataFrame
-    per_fold = pd.DataFrame(rows).sort_values(["CUSTOMER","model","fold"]).reset_index(drop=True)
+    per_fold = pd.DataFrame(rows).sort_values(["CUSTOMER", "model", "fold"]).reset_index(drop=True)
+    detail_df = pd.concat(detail_rows, ignore_index=True) if detail_rows else pd.DataFrame()
 
     # Save separate error log
     err_df = per_fold[per_fold["model"].str.contains("_ERROR", na=False)]
@@ -430,14 +432,65 @@ def run_candidates_per_customer(
     # Summary (ignore error rows)
     summary = (
         per_fold[~per_fold["model"].str.contains("_ERROR", na=False)]
-        .groupby(["CUSTOMER","model"], as_index=False)[["MAE","RMSE","sMAPE"]]
+        .groupby(["CUSTOMER", "model"], as_index=False)[["MAE", "RMSE", "sMAPE"]]
         .mean()
-        .sort_values(["CUSTOMER","sMAPE"])
         .reset_index(drop=True)
     )
+
+    if not summary.empty:
+        for metric in ["MAE", "RMSE", "sMAPE"]:
+            col_norm = f"{metric}_norm"
+            summary[col_norm] = 0.0
+            for cust, idx in summary.groupby("CUSTOMER").groups.items():
+                values = summary.loc[idx, metric]
+                best_val = values.min()
+                denom = best_val if best_val > 1e-8 else 1e-8
+                summary.loc[idx, col_norm] = values / denom
+        w_mae, w_rmse, w_smape = composite_weights
+        summary["CompositeScore"] = (
+            summary["MAE_norm"] * w_mae
+            + summary["RMSE_norm"] * w_rmse
+            + summary["sMAPE_norm"] * w_smape
+        )
+        summary = summary.sort_values(["CUSTOMER", "CompositeScore"]).reset_index(drop=True)
+        best_idx = summary.groupby("CUSTOMER")["CompositeScore"].idxmin()
+        best_models_df = summary.loc[best_idx].reset_index(drop=True)
+    else:
+        best_models_df = pd.DataFrame(columns=["CUSTOMER", "model", "CompositeScore"])
+
+    peak_metrics = compute_peak_metrics(detail_df) if not detail_df.empty else pd.DataFrame()
+
+    if write_best_yaml and not best_models_df.empty:
+        best_cfg = {"customers": {}}
+        for _, row in best_models_df.iterrows():
+            cust = row["CUSTOMER"]
+            model_name = row["model"]
+            orig_spec = copy.deepcopy(cfg["customers"].get(cust, {}))
+            chosen = None
+            for entry in orig_spec.get("models", []):
+                if entry.get("name") == model_name:
+                    chosen = copy.deepcopy(entry)
+                    break
+            if chosen is None:
+                continue
+            cust_cfg = {
+                "transform": orig_spec.get("transform", "raw"),
+                "cv": orig_spec.get("cv", {}),
+                "models": [chosen],
+            }
+            best_cfg["customers"][cust] = cust_cfg
+
+        best_path = Path(best_yaml_path) if best_yaml_path else (Path(out_dir) / "best_models_composite.yaml")
+        best_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(best_path, "w") as f:
+            yaml.safe_dump(best_cfg, f, sort_keys=False)
 
     if save_csv:
         per_fold.to_csv(out_path / "candidates_per_fold.csv", index=False)
         summary.to_csv(out_path / "candidates_summary.csv", index=False)
+        if not detail_df.empty:
+            detail_df.to_csv(out_path / "candidates_predictions.csv", index=False)
+        if not peak_metrics.empty:
+            peak_metrics.to_csv(out_path / "candidates_peak_metrics.csv", index=False)
 
-    return per_fold, summary
+    return per_fold, summary, peak_metrics, best_models_df

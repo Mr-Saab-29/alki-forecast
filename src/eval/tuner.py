@@ -128,7 +128,7 @@ def tune_per_customer(
                 tmp_yaml = _single_run_yaml(base_cfg, cust, name, family, params)
 
                 # run a single-model CV for this customer
-                per_fold, summary = run_candidates_per_customer(
+                per_fold, summary, _, _ = run_candidates_per_customer(
                     df_clean,
                     model_matrix_path=tmp_yaml,
                     # Optional pass-through overrides
@@ -166,7 +166,11 @@ def tune_per_customer(
     # Re-run a single consolidated CV using the best config (for one clean report)
     tmp_all = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
     yaml.safe_dump(best_cfg, tmp_all); tmp_all.flush(); tmp_all.close()
-    per_fold_best, summary_best = run_candidates_per_customer(
-        df_clean, model_matrix_path=tmp_all.name, save_csv=False, **(cv_defaults or {}), **(features_defaults or {})
+    per_fold_best, summary_best, _, _ = run_candidates_per_customer(
+        df_clean,
+        model_matrix_path=tmp_all.name,
+        save_csv=False,
+        **(cv_defaults or {}),
+        **(features_defaults or {})
     )
     return per_fold_best, summary_best, best_cfg
