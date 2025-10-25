@@ -33,19 +33,16 @@ This repository implements a reproducible, end‑to‑end workflow for Alki's de
 
 ## 2. Environment Setup
 
-1. Create and activate a virtual environment (Python ≥ 3.10 recommended).
-2. Install dependencies (for example):
-   Make sure you have uv installed, if not, run the below in the terminal 
-   
-   ```
+1. Install uv
+   ```bash
    pip install uv
    ```
-   Then run the below command to install the dependencies
-
+2. Create Virtual environment and install the dependencies:
+   
    ```bash
    uv sync
    ```
-3. Ensure `data/raw/train_set.csv` is available
+4. Ensure `data/raw/train_set.csv` is available
 
 ---
 
