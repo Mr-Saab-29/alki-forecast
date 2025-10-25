@@ -2,6 +2,7 @@ from __future__ import annotations
 import pickle
 from pathlib import Path
 from typing import Dict, Optional, Tuple
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -18,10 +19,66 @@ from src.features.future_features import build_future_features
 from src.models.gbm import _align_columns, _make_roll_stats
 
 
+@dataclass
+class ForecastIntervals:
+    mean: pd.Series
+    p10: Optional[np.ndarray]
+    p90: Optional[np.ndarray]
+
+
+def _bootstrap_prediction_intervals(
+    base_forecast: np.ndarray,
+    residuals: np.ndarray,
+    *,
+    n_samples: int = 600,
+    block_size: int = 7,
+) -> Tuple[Optional[np.ndarray], Optional[np.ndarray]]:
+    res = np.asarray(residuals, dtype=float)
+    res = res[np.isfinite(res)]
+    if res.size == 0:
+        return None, None
+
+    rng = np.random.default_rng(42)
+    horizon = len(base_forecast)
+    block_size = max(1, min(block_size, res.size))
+    draws = np.empty((n_samples, horizon), dtype=float)
+
+    for i in range(n_samples):
+        start = rng.integers(0, res.size)
+        noise = np.empty(horizon, dtype=float)
+        for h in range(horizon):
+            idx = (start + h) % res.size
+            noise[h] = res[idx]
+        draws[i] = base_forecast + noise
+
+    lower = np.quantile(draws, 0.10, axis=0)
+    upper = np.quantile(draws, 0.90, axis=0)
+    return lower, upper
+
+
 def _compute_sigma(residuals: np.ndarray) -> float:
     if residuals.size == 0:
         return 1.0
     return float(np.nanstd(residuals, ddof=1) or 1.0)
+
+
+def _extract_quantiles(bundle: ForecastIntervals, residuals: np.ndarray, quantile_z: float):
+    p50 = bundle.mean.to_numpy()
+    lower = bundle.p10
+    upper = bundle.p90
+    if (
+        lower is not None
+        and upper is not None
+        and len(lower) == len(p50)
+        and len(upper) == len(p50)
+    ):
+        p10 = np.clip(np.asarray(lower, dtype=float), 0, None)
+        p90 = np.clip(np.asarray(upper, dtype=float), 0, None)
+    else:
+        sigma = _compute_sigma(np.asarray(residuals, dtype=float))
+        p10 = np.clip(p50 - quantile_z * sigma, 0, None)
+        p90 = np.clip(p50 + quantile_z * sigma, 0, None)
+    return p50, p10, p90
 
 
 def _fit_arima_model(
@@ -58,15 +115,34 @@ def _fit_arima_model(
         enforce_invertibility=False,
     )
     results = model.fit(disp=False)
-    fc = results.forecast(steps=horizon, exog=exog_future)
+    pred = results.get_forecast(steps=horizon, exog=exog_future)
+    fc = pred.predicted_mean
+    try:
+        conf = pred.conf_int(alpha=0.2)
+        if hasattr(conf, "iloc"):
+            lower_arr = conf.iloc[:, 0].to_numpy()
+            upper_arr = conf.iloc[:, 1].to_numpy()
+        else:
+            conf_np = np.asarray(conf)
+            lower_arr = conf_np[:, 0]
+            upper_arr = conf_np[:, 1]
+    except Exception:
+        lower_arr = upper_arr = None
     if transform == "log1p":
         fitted = np.expm1(results.fittedvalues)
         forecast = np.expm1(fc)
+        if lower_arr is not None and upper_arr is not None:
+            lower = np.expm1(lower_arr)
+            upper = np.expm1(upper_arr)
+        else:
+            lower = upper = None
     else:
         fitted = results.fittedvalues
         forecast = fc
+        lower = lower_arr
+        upper = upper_arr
     residuals = series.values - fitted
-    return results, pd.Series(forecast, name="yhat"), residuals
+    return results, ForecastIntervals(pd.Series(forecast, name="yhat"), lower, upper), residuals
 
 
 def _fit_ets_model(series: pd.Series, params: Dict, transform: str, horizon: int):
@@ -87,15 +163,35 @@ def _fit_ets_model(series: pd.Series, params: Dict, transform: str, horizon: int
         initialization_method="estimated",
     )
     results = model.fit(optimized=True)
-    fc = results.forecast(horizon)
+    lower_arr = upper_arr = None
+    try:
+        pred = results.get_prediction(start=len(endog), end=len(endog) + horizon - 1)
+        fc = pred.predicted_mean
+        conf = pred.conf_int(alpha=0.2)
+        if hasattr(conf, "iloc"):
+            lower_arr = conf.iloc[:, 0].to_numpy()
+            upper_arr = conf.iloc[:, 1].to_numpy()
+        else:
+            conf_np = np.asarray(conf)
+            lower_arr = conf_np[:, 0]
+            upper_arr = conf_np[:, 1]
+    except Exception:
+        fc = results.forecast(horizon)
     if transform == "log1p":
         fitted = np.expm1(results.fittedvalues)
         forecast = np.expm1(fc)
+        if lower_arr is not None and upper_arr is not None:
+            lower = np.expm1(lower_arr)
+            upper = np.expm1(upper_arr)
+        else:
+            lower = upper = None
     else:
         fitted = results.fittedvalues
         forecast = fc
+        lower = lower_arr
+        upper = upper_arr
     residuals = series.values - fitted
-    return results, pd.Series(forecast, name="yhat"), residuals
+    return results, ForecastIntervals(pd.Series(forecast, name="yhat"), lower, upper), residuals
 
 
 def _fit_prophet_model(
@@ -120,6 +216,7 @@ def _fit_prophet_model(
         weekly_seasonality=True,
         yearly_seasonality=True,
         daily_seasonality=False,
+        interval_width=0.8,
     )
 
     hist = pd.DataFrame({"ds": idx, "y": y_fit})
@@ -132,21 +229,31 @@ def _fit_prophet_model(
             m.add_regressor(col)
         hist = pd.concat([hist.reset_index(drop=True), exog_train.reset_index(drop=True)], axis=1)
     m.fit(hist)
+    hist_pred = m.predict(hist)
     future = m.make_future_dataframe(periods=horizon, freq="D", include_history=False)
     if exog_future is not None and not exog_future.empty:
         exog_future = exog_future.copy()
         exog_future.index = pd.to_datetime(exog_future.index)
         exog_future = exog_future.reindex(future["ds"]).fillna(0.0)
         future = pd.concat([future.reset_index(drop=True), exog_future.reset_index(drop=True)], axis=1)
-    fc = m.predict(future)["yhat"]
+    future_pred = m.predict(future)
+    fc = future_pred["yhat"]
+    lower_series = future_pred.get("yhat_lower")
+    upper_series = future_pred.get("yhat_upper")
     if transform == "log1p":
         forecast = np.expm1(fc)
-        fitted = np.expm1(m.predict(hist)[["yhat"]]).values.flatten()
+        fitted = np.expm1(hist_pred[["yhat"]]).values.flatten()
+        lower = np.expm1(lower_series) if lower_series is not None else None
+        upper = np.expm1(upper_series) if upper_series is not None else None
     else:
         forecast = fc
-        fitted = m.predict(hist)[["yhat"]].values.flatten()
+        fitted = hist_pred[["yhat"]].values.flatten()
+        lower = lower_series.to_numpy() if lower_series is not None else None
+        upper = upper_series.to_numpy() if upper_series is not None else None
     residuals = y.values - fitted
-    return m, pd.Series(forecast.values, name="yhat"), residuals
+    lower_np = lower.to_numpy() if hasattr(lower, "to_numpy") else lower
+    upper_np = upper.to_numpy() if hasattr(upper, "to_numpy") else upper
+    return m, ForecastIntervals(pd.Series(forecast.values, name="yhat"), lower_np, upper_np), residuals
 
 
 def _fit_gbm_model(
@@ -208,23 +315,33 @@ def _fit_gbm_model(
     from collections import deque
 
     buffer = deque(buffer.tolist(), maxlen=max_lag)
-    preds = []
-    rows = []
+    preds: list[float] = []
     for i in range(horizon):
         base = fut_tpl.iloc[i].drop(labels=["DATE", "CUSTOMER"], errors="ignore").to_dict()
         for k in range(1, max_lag + 1):
             base[f"lag_{k}"] = buffer[k - 1] if len(buffer) >= k else np.nan
         base.update(_make_roll_stats(buffer, list(roll_windows)))
-        rows.append(base)
 
-    X_fut = pd.DataFrame(rows)
-    X_fut = _align_columns(X_tr, X_fut).fillna(0.0)
+        row_df = pd.DataFrame([base])
+        row_df = _align_columns(X_tr, row_df).fillna(0.0)
 
-    fut_pred = model.predict(X_fut)
-    if transform == "log1p":
-        fut_pred = np.expm1(fut_pred)
+        step_pred = model.predict(row_df)[0]
+        if transform == "log1p":
+            step_pred = np.expm1(step_pred)
+        step_pred = float(np.clip(step_pred, 0, None))
+        preds.append(step_pred)
 
-    return model, pd.Series(fut_pred, name="yhat"), residuals
+        if max_lag > 0:
+            buffer.appendleft(step_pred)
+
+    fut_pred = np.asarray(preds, dtype=float)
+    lower, upper = _bootstrap_prediction_intervals(fut_pred, residuals)
+    if lower is not None:
+        lower = np.clip(lower, 0, None)
+    if upper is not None:
+        upper = np.clip(upper, 0, None)
+
+    return model, ForecastIntervals(pd.Series(fut_pred, name="yhat"), lower, upper), residuals
 
 
 def save_models_and_forecast(
@@ -238,8 +355,9 @@ def save_models_and_forecast(
 ) -> pd.DataFrame:
     """
     Fit the best models per customer, save them to disk, and generate
-    21-day forecasts with P10/P50/P90 quantiles using a simple residual-based
-    normal approximation.
+    21-day forecasts with P10/P50/P90 quantiles. Wherever possible we use
+    model-native predictive intervals (SARIMA/ETS/Prophet, GBM bootstrap);
+    otherwise we fall back to a residual normal approximation.
 
     Args:
         df_clean: Cleaned historical data.
@@ -306,7 +424,7 @@ def save_models_and_forecast(
         exog_future_arr = None if exog_future_df.empty else exog_future_df.to_numpy()
 
         if family == "arima":
-            model, fc_series, residuals = _fit_arima_model(
+            model, fc_bundle, residuals = _fit_arima_model(
                 series,
                 params,
                 transform,
@@ -319,7 +437,7 @@ def save_models_and_forecast(
                 pickle.dump(model, f)
 
         elif family == "sarima":
-            model, fc_series, residuals = _fit_arima_model(
+            model, fc_bundle, residuals = _fit_arima_model(
                 series,
                 params,
                 transform,
@@ -332,13 +450,13 @@ def save_models_and_forecast(
                 pickle.dump(model, f)
 
         elif family == "ets":
-            model, fc_series, residuals = _fit_ets_model(series, params, transform, horizon)
+            model, fc_bundle, residuals = _fit_ets_model(series, params, transform, horizon)
             model_path = models_dir / f"{cust}_ETS.pkl"
             with open(model_path, "wb") as f:
                 pickle.dump(model, f)
 
         elif family == "prophet":
-            model, fc_series, residuals = _fit_prophet_model(
+            model, fc_bundle, residuals = _fit_prophet_model(
                 df_c,
                 transform,
                 params,
@@ -350,7 +468,7 @@ def save_models_and_forecast(
             model_path.write_text(model_to_json(model))
 
         elif family == "gbm":
-            model, fc_series, residuals = _fit_gbm_model(
+            model, fc_bundle, residuals = _fit_gbm_model(
                 df_c,
                 transform=transform,
                 params=params,
@@ -366,10 +484,7 @@ def save_models_and_forecast(
         else:
             raise ValueError(f"Unsupported family '{family}' for customer {cust}.")
 
-        sigma = _compute_sigma(np.asarray(residuals, dtype=float))
-        p50 = fc_series.to_numpy()
-        p10 = np.clip(p50 - quantile_z * sigma, 0, None)
-        p90 = np.clip(p50 + quantile_z * sigma, 0, None)
+        p50, p10, p90 = _extract_quantiles(fc_bundle, np.asarray(residuals, dtype=float), quantile_z)
 
         for date, qp50, qp10, qp90 in zip(future_dates, p50, p10, p90):
             forecast_records.append({

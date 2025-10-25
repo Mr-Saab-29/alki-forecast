@@ -87,7 +87,6 @@ def fit_predict_gbm_recursive(
     tag, Model = _get_xgb(use_lightgbm)
     model = Model(**params)
     model.fit(X_tr, y_fit)
-    feat_cols = X_tr.columns
 
     # 2) Build deterministic future template
     fut_tpl = build_future_features_fn(train_df, horizon=horizon)  # must include DATE (+ calendar/holiday/time features)
@@ -100,8 +99,7 @@ def fit_predict_gbm_recursive(
     )
     buffer = deque(tail.tolist(), maxlen=max_lag)
 
-    preds = []
-    rows_for_pred = []
+    preds: list[float] = []
 
     for i in range(horizon):
         base_row = fut_tpl.iloc[i].drop(labels=["DATE","CUSTOMER"], errors="ignore").to_dict()
@@ -114,21 +112,16 @@ def fit_predict_gbm_recursive(
         roll_feats = _make_roll_stats(buffer, list(roll_windows))
         base_row.update(roll_feats)
 
-        rows_for_pred.append(base_row)
-        # We'll align + impute after we stack rows into a DataFrame.
+        row_df = pd.DataFrame([base_row])
+        row_df = _align_columns(X_tr, row_df).fillna(0.0)
 
-        # we need a placeholder prediction to update buffer; actual prediction done after alignment
-        # (we'll do it below once we have a DataFrame)
-    # Build future design matrix (all rows), align to training columns
-    X_fut = pd.DataFrame(rows_for_pred)
-    X_fut = _align_columns(X_tr, X_fut)
-    # simple imputation for any NaNs created by early short buffers
-    X_fut = X_fut.fillna(0.0)
+        step_pred = model.predict(row_df)[0]
+        if transform == "log1p":
+            step_pred = np.expm1(step_pred)
+        step_pred = float(np.clip(step_pred, 0, None))
+        preds.append(step_pred)
 
-    # Predict all in one go, but this is still causal because features were constructed only from historical buffer
-    yhat = model.predict(X_fut)
-    if transform == "log1p":
-        yhat = np.expm1(yhat)
-    yhat = np.clip(yhat, 0, None)
+        if max_lag > 0:
+            buffer.appendleft(step_pred)
 
-    return yhat
+    return np.asarray(preds, dtype=float)

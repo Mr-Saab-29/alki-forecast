@@ -24,7 +24,7 @@ def main(args: argparse.Namespace) -> None:
         min_nonzero_run=5,
         min_nonzero_value=1.0,
         gap_limit=7,
-        causal=False,
+        causal=True,
         verbose=True,)
 
     output_path = Path(args.output_path)

@@ -504,11 +504,8 @@ def run_candidates_per_customer(
                     break
             if chosen is None:
                 continue
-            cust_cfg = {
-                "transform": orig_spec.get("transform", "raw"),
-                "cv": orig_spec.get("cv", {}),
-                "models": [chosen],
-            }
+            cust_cfg = copy.deepcopy(orig_spec) if isinstance(orig_spec, dict) else {}
+            cust_cfg["models"] = [chosen]
             best_cfg["customers"][cust] = cust_cfg
 
         best_path = Path(best_yaml_path) if best_yaml_path else (Path(out_dir) / "best_models_composite.yaml")

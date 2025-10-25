@@ -214,7 +214,7 @@ def preprocess_all_customers(
     gap_limit: int = 7,
     long_gap_days: int = 30,   
     min_active_days: int = 30,
-    causal: bool = False,
+    causal: bool = True,
     verbose: bool = True,
     min_nonzero_run: int = 5,
     min_nonzero_value: float = 1.0,
